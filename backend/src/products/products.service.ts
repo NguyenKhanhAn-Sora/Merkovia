@@ -445,12 +445,59 @@ export class ProductsService {
 
       if (res.modifiedCount !== 1) {
         await this.releaseStock(reserved); // hoàn lại phần đã giữ
-        throw new ConflictException(
-          'Sản phẩm vừa hết hàng hoặc ngừng bán. Vui lòng kiểm tra lại giỏ hàng.',
-        );
+        throw new ConflictException(await this.explainReserveFailure(item));
       }
       reserved.push(item);
     }
+  }
+
+  /**
+   * Dựng thông báo lỗi CỤ THỂ khi giữ kho thất bại.
+   *
+   * Chỉ chạy trên đường thất bại (hiếm) nên đọc thêm một lần là chấp nhận được,
+   * đổi lại người mua biết đích xác món nào hỏng và vì sao — "đơn hàng thất
+   * bại" chung chung thì họ không biết phải sửa gì trong giỏ.
+   *
+   * Kèm `detail` có cấu trúc để giao diện tô đúng dòng bị lỗi.
+   */
+  private async explainReserveFailure(item: StockItem) {
+    const product = await this.productModel
+      .findById(item.productId)
+      .select('name variants status deletedAt');
+
+    const detail = {
+      productId: item.productId,
+      variantId: item.variantId,
+      name: product?.name,
+    };
+
+    const reject = (message: string, available?: number) => ({
+      message,
+      error: 'Conflict',
+      statusCode: 409,
+      reason: { ...detail, available },
+    });
+
+    if (!product || product.deletedAt || product.status !== 'active') {
+      return reject(
+        `"${product?.name ?? 'Sản phẩm'}" đã ngừng bán hoặc bị gỡ khỏi gian hàng.`,
+      );
+    }
+
+    const variant = product.variants.find(
+      (v) => String(v._id) === String(item.variantId),
+    );
+    if (!variant || variant.isActive === false) {
+      return reject(`Phân loại bạn chọn của "${product.name}" đã ngừng bán.`);
+    }
+
+    // Còn hàng nhưng không đủ — nói rõ còn bao nhiêu để người mua giảm số lượng.
+    return reject(
+      variant.stock > 0
+        ? `"${product.name}" chỉ còn ${variant.stock} sản phẩm, không đủ ${item.quantity} như bạn đặt.`
+        : `"${product.name}" vừa hết hàng.`,
+      variant.stock,
+    );
   }
 
   /**
@@ -465,6 +512,28 @@ export class ProductsService {
         { $inc: { 'variants.$[v].stock': item.quantity } },
         { arrayFilters: [{ 'v._id': item.variantId }] },
       );
+    }
+  }
+
+  /**
+   * Cộng lượt bán khi đơn giao thành công.
+   *
+   * Cố tình KHÔNG cộng lúc đặt hàng: đơn còn có thể bị huỷ, và "đã bán" hiện
+   * cho người mua nên là số giao thành công thật. Lỗi ở đây không được làm
+   * hỏng việc chuyển trạng thái đơn nên chỉ ghi log.
+   */
+  async recordSold(items: StockItem[]): Promise<void> {
+    for (const item of items) {
+      await this.productModel
+        .updateOne(
+          { _id: item.productId },
+          { $inc: { 'stats.sold': item.quantity } },
+        )
+        .catch((e: unknown) =>
+          this.logger.warn(
+            `Không cộng được lượt bán cho ${item.productId}: ${String(e)}`,
+          ),
+        );
     }
   }
 

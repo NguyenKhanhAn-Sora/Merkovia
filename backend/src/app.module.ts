@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { UserThrottlerGuard } from './common/user-throttler.guard';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -13,13 +14,16 @@ import { ShopsModule } from './shops/shops.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { OrdersModule } from './orders/orders.module';
+import { PaymentsModule } from './payments/payments.module';
 import { GeoModule } from './geo/geo.module';
 import { MediaModule } from './media/media.module';
 import { config } from './config/config';
 
 @Module({
   imports: [
-    // Rate limiting: mặc định 120 request/phút/IP (chống lạm dụng, brute-force).
+    // Rate limiting: mặc định 120 request/phút mỗi phiên (chống lạm dụng,
+    // brute-force). Chưa đăng nhập thì đếm theo IP — xem UserThrottlerGuard.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     // Cron chạy trong tiến trình (dọn thùng rác sản phẩm) — không cần Redis.
     ScheduleModule.forRoot(),
@@ -31,11 +35,15 @@ import { config } from './config/config';
     CategoriesModule,
     ProductsModule,
     CatalogModule,
+    OrdersModule,
+    PaymentsModule,
     GeoModule,
     MediaModule,
     AuthModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  // Đếm theo phiên đăng nhập, không theo IP — nhiều người dùng chung một IP
+  // qua NAT nhà mạng/công ty là chuyện bình thường ở VN.
+  providers: [AppService, { provide: APP_GUARD, useClass: UserThrottlerGuard }],
 })
 export class AppModule {}

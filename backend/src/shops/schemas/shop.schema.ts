@@ -36,6 +36,49 @@ export class PickupAddress {
 export const PickupAddressSchema = SchemaFactory.createForClass(PickupAddress);
 
 /**
+ * Tài khoản ngân hàng nhận tiền bán hàng.
+ *
+ * 🔴 `accountHolderName` LUÔN lấy từ kết quả tra cứu của ngân hàng, KHÔNG bao
+ * giờ nhận từ người bán gõ vào. Cho gõ tay thì gõ sai hoặc khai gian đều lọt,
+ * đến lúc chi tiền mới vỡ và tiền đã đi mất.
+ *
+ * Chỉ tài khoản `verified` mới được nhận tiền. Đổi số tài khoản luôn phải tra
+ * cứu lại từ đầu — không có đường nào ghi thẳng trạng thái đã xác thực.
+ */
+@Schema({ _id: false })
+export class BankAccount {
+  /** Mã BIN 6 số theo chuẩn VietQR/NAPAS. */
+  @Prop({ trim: true, required: true })
+  bankBin: string;
+
+  /* Chụp lại tên ngân hàng để hiển thị đúng kể cả khi danh sách đổi về sau. */
+  @Prop({ trim: true, required: true })
+  bankName: string;
+
+  @Prop({ trim: true, required: true })
+  bankCode: string;
+
+  @Prop({ trim: true, required: true, maxlength: 24 })
+  accountNumber: string;
+
+  /** Tên chủ tài khoản do NGÂN HÀNG trả về. */
+  @Prop({ trim: true, required: true })
+  accountHolderName: string;
+
+  /** Tên chủ TK có khớp người đại diện shop không — chỉ để cảnh báo. */
+  @Prop({ default: false })
+  nameMatchesContact: boolean;
+
+  @Prop({ required: true })
+  verifiedAt: Date;
+
+  /** Nhà cung cấp đã xác thực; `mock` = dữ liệu giả lập, không dùng để chi tiền thật. */
+  @Prop({ trim: true, required: true })
+  verifiedBy: string;
+}
+export const BankAccountSchema = SchemaFactory.createForClass(BankAccount);
+
+/**
  * Shop — pháp nhân bán hàng, quan hệ 1–1 với User (một tài khoản = một shop).
  * Tách khỏi Profile (thông tin cá nhân) vì shop có vòng đời & quyền riêng.
  */
@@ -124,6 +167,34 @@ export class Shop {
 
   @Prop({ type: String, enum: SHOP_STATUS, default: 'active', index: true })
   status: ShopStatus;
+
+  /** Tài khoản nhận tiền — chưa liên kết thì `undefined`. */
+  @Prop({ type: BankAccountSchema })
+  bankAccount?: BankAccount;
+
+  /**
+   * Lịch sử đổi tài khoản nhận tiền.
+   * Đổi số tài khoản là mục tiêu kinh điển của chiếm đoạt tài khoản, nên phải
+   * lưu vết để đối soát khi có tranh chấp về tiền.
+   */
+  @Prop({
+    type: [
+      {
+        _id: false,
+        at: Date,
+        bankBin: String,
+        accountNumber: String,
+        accountHolderName: String,
+      },
+    ],
+    default: [],
+  })
+  bankAccountHistory: {
+    at: Date;
+    bankBin: string;
+    accountNumber: string;
+    accountHolderName: string;
+  }[];
 }
 
 export const ShopSchema = SchemaFactory.createForClass(Shop);

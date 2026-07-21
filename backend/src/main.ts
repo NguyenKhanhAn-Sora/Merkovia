@@ -4,7 +4,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { config } from './config/config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // `rawBody` giữ lại thân request nguyên byte — bắt buộc để xác thực chữ ký
+  // webhook thanh toán. Parse rồi stringify lại có thể đổi thứ tự khoá và làm
+  // chữ ký sai oan, khiến sự kiện thanh toán thật bị từ chối.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
     app.enableCors({
     origin: config.corsOrigin,

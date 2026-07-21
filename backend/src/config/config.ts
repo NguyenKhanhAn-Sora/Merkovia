@@ -102,6 +102,29 @@ export const config = {
     sameSite: optional('COOKIE_SAMESITE', 'lax') as 'lax' | 'strict' | 'none',
   },
 
+  // URL app người mua — cổng thanh toán dùng để đưa khách quay về sau khi trả.
+  frontendUrl: optional('FRONTEND_URL', 'http://localhost:3000'),
+
+  /**
+   * Bí mật ký/xác thực webhook thanh toán.
+   * Với cổng thật đây là secret do nhà cung cấp cấp. Có giá trị mặc định để
+   * môi trường dev vẫn boot được, nhưng KHÔNG được dùng mặc định khi chạy thật.
+   */
+  paymentWebhookSecret: optional(
+    'PAYMENT_WEBHOOK_SECRET',
+    'merkovia-dev-webhook-secret',
+  ),
+
+  /** Hoa hồng sàn giữ lại trên tiền hàng (0.05 = 5%). */
+  commissionRate: optionalNumber('COMMISSION_RATE', 0.05),
+
+  /**
+   * Số ngày giữ tiền sau khi giao thành công rồi mới cho rút.
+   * Đây là cửa sổ để người mua khiếu nại/trả hàng — chi tiền ngay là mất khả
+   * năng hoàn tiền cho khách.
+   */
+  payoutHoldDays: optionalNumber('PAYOUT_HOLD_DAYS', 3),
+
   // Lưu trữ media — Cloudflare R2 (S3-compatible). Optional để app vẫn boot
   // khi chưa cấu hình; endpoint upload sẽ báo lỗi rõ ràng nếu thiếu.
   r2: {

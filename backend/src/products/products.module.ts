@@ -18,6 +18,7 @@ import { MediaModule } from '../media/media.module';
   ],
   controllers: [ProductsController],
   providers: [ProductsService],
-  exports: [MongooseModule],
+  // OrdersModule dùng ProductsService để giữ/hoàn kho khi tạo & huỷ đơn.
+  exports: [MongooseModule, ProductsService],
 })
 export class ProductsModule {}
