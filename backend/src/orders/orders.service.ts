@@ -25,15 +25,15 @@ import {
   PAYMENT_GRACE_MINUTES,
   PaymentService,
 } from '../payments/payment.service';
+import {
+  chargeableWeight,
+  ShippingProvider,
+  type ShippingQuote,
+} from '../shipping/shipping.provider';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { shortId } from '../common/text';
 import type { UserDocument } from '../users/schemas/user.schema';
-
-/** Phí vận chuyển tạm tính — mỗi gian hàng tính riêng vì giao từ kho khác nhau. */
-const SHIPPING_FEE = 30_000;
-/** Tiền hàng từ mức này trở lên thì miễn phí giao (tính riêng theo từng shop). */
-const FREE_SHIPPING_THRESHOLD = 500_000;
 
 /** Thời gian giữ kho cho đơn chờ thanh toán online. */
 const PAYMENT_WINDOW_MINUTES = 15;
@@ -56,6 +56,7 @@ export class OrdersService {
     private readonly addressModel: Model<AddressDocument>,
     private readonly products: ProductsService,
     private readonly payments: PaymentService,
+    private readonly shipping: ShippingProvider,
   ) {}
 
   /* ------------------------------ Tiện ích ------------------------------- */
@@ -70,10 +71,6 @@ export class OrdersService {
     const deal = product.activeDeal;
     if (!deal || new Date(deal.endsAt).getTime() <= Date.now()) return listPrice;
     return deal.price < listPrice ? deal.price : listPrice;
-  }
-
-  private shippingFeeFor(itemsTotal: number): number {
-    return itemsTotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FEE;
   }
 
   /** Các dòng hàng của đơn dưới dạng đầu vào cho giữ/hoàn kho. */
@@ -113,10 +110,67 @@ export class OrdersService {
         recipientPhone: a.recipientPhone,
         street: a.street,
         ward: a.ward,
+        wardCode: a.wardCode,
         district: a.district,
         province: a.province,
+        // Mã + toạ độ để trang thanh toán tính được cước ngay khi mở.
+        provinceCode: a.provinceCode,
+        lat: a.lat,
+        lng: a.lng,
         isDefault: a.isDefault,
       })),
+    };
+  }
+
+  /**
+   * Báo giá giỏ hàng trước khi đặt: tiền hàng, cước vận chuyển từng gian hàng.
+   *
+   * 🔴 Dùng CHUNG `buildGroups` với `checkout`, không tính lại theo công thức
+   * riêng. Nếu tách hai đường, con số người mua nhìn thấy sẽ có ngày lệch con
+   * số bị trừ — và đó là loại lỗi người dùng mất niềm tin ngay lập tức.
+   *
+   * Không giữ kho, không ghi gì.
+   */
+  async quote(user: UserDocument, dto: CreateOrderDto) {
+    const { groups } = await this.buildGroups(user, dto);
+
+    const shops = groups.map((g) => ({
+      shopId: String(g.shop._id),
+      shopName: g.shop.name,
+      itemCount: g.items.reduce((n, i) => n + i.quantity, 0),
+      itemsTotal: g.itemsTotal,
+      weightGram: g.weightGram,
+      shippingFee: g.shippingFee,
+      baseShippingFee: g.shipping?.baseFee ?? g.shippingFee,
+      freeShipping: g.shipping?.freeShipping ?? false,
+      zone: g.shipping?.zone,
+      distanceKm: g.shipping?.distanceKm,
+      // Ngày giao dự kiến = thời gian shop chuẩn bị hàng + thời gian vận chuyển.
+      etaDays: g.shipping
+        ? {
+            min: g.shipping.etaDays.min + (g.shop.preparationDays ?? 0),
+            max: g.shipping.etaDays.max + (g.shop.preparationDays ?? 0),
+          }
+        : undefined,
+      serviceName: g.shipping?.serviceName,
+    }));
+
+    const itemsTotal = shops.reduce((s, g) => s + g.itemsTotal, 0);
+    const shippingTotal = shops.reduce((s, g) => s + g.shippingFee, 0);
+
+    return {
+      shops,
+      itemsTotal,
+      shippingTotal,
+      shippingSaved: shops.reduce(
+        (s, g) => s + (g.baseShippingFee - g.shippingFee),
+        0,
+      ),
+      total: itemsTotal + shippingTotal,
+      carrier: {
+        name: this.shipping.name,
+        isCarrier: this.shipping.isCarrier,
+      },
     };
   }
 
@@ -275,7 +329,10 @@ export class OrdersService {
         shop: ShopDocument;
         items: OrderItem[];
         itemsTotal: number;
+        /** Khối lượng tính cước của cả kiện hàng shop này (gram). */
+        weightGram: number;
         shippingFee: number;
+        shipping?: ShippingQuote;
         status: OrderStatus;
         paymentExpiresAt?: Date;
       }
@@ -325,6 +382,7 @@ export class OrdersService {
         shop,
         items: [],
         itemsTotal: 0,
+        weightGram: 0,
         shippingFee: 0,
         status: 'pending' as OrderStatus,
       };
@@ -342,17 +400,40 @@ export class OrdersService {
         subtotal,
       });
       group.itemsTotal += subtotal;
+      // Khối lượng tính cước cộng dồn theo từng món × số lượng.
+      group.weightGram +=
+        chargeableWeight(product.shipping ?? {}) * item.quantity;
       groups.set(key, group);
     }
 
-    // Phí ship và trạng thái ban đầu chốt sau khi đã biết tổng tiền từng shop.
+    // Cước vận chuyển và trạng thái ban đầu chốt sau khi đã biết tổng tiền và
+    // tổng khối lượng của từng gian hàng.
     const online = dto.paymentMethod === 'online';
     const expiresAt = online
       ? new Date(Date.now() + PAYMENT_WINDOW_MINUTES * 60_000)
       : undefined;
 
+    const to = {
+      provinceCode: dto.shippingAddress.provinceCode,
+      wardCode: dto.shippingAddress.wardCode,
+      lat: dto.shippingAddress.lat,
+      lng: dto.shippingAddress.lng,
+    };
+
     for (const group of groups.values()) {
-      group.shippingFee = this.shippingFeeFor(group.itemsTotal);
+      const pickup = group.shop.pickupAddress ?? {};
+      group.shipping = this.shipping.quote({
+        from: {
+          provinceCode: pickup.provinceCode,
+          wardCode: pickup.wardCode,
+          lat: pickup.lat,
+          lng: pickup.lng,
+        },
+        to,
+        weightGram: group.weightGram,
+        itemsTotal: group.itemsTotal,
+      });
+      group.shippingFee = group.shipping.fee;
       group.status = online ? 'pending_payment' : 'pending';
       group.paymentExpiresAt = expiresAt;
     }

@@ -102,6 +102,20 @@ export const config = {
     sameSite: optional('COOKIE_SAMESITE', 'lax') as 'lax' | 'strict' | 'none',
   },
 
+  /**
+   * Goong Maps — gợi ý địa chỉ chi tiết và lấy toạ độ.
+   *
+   * Chọn Goong vì **Google Maps không nhận thanh toán từ tài khoản Việt Nam**,
+   * còn API của Goong tương thích với Google nên đổi sang sau này chỉ là đổi
+   * endpoint. Để trống thì tính năng gợi ý TỰ TẮT — ô địa chỉ vẫn nhập tay
+   * được. Tuyệt đối không sinh gợi ý giả: người dùng sẽ tưởng địa chỉ đã được
+   * kiểm chứng trong khi không có gì được kiểm cả.
+   */
+  goong: {
+    apiKey: optional('GOONG_API_KEY', ''),
+    baseUrl: optional('GOONG_BASE_URL', 'https://rsapi.goong.io'),
+  },
+
   // URL app người mua — cổng thanh toán dùng để đưa khách quay về sau khi trả.
   frontendUrl: optional('FRONTEND_URL', 'http://localhost:3000'),
 

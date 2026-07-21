@@ -16,6 +16,7 @@ import { ProductsModule } from './products/products.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ShippingModule } from './shipping/shipping.module';
 import { GeoModule } from './geo/geo.module';
 import { MediaModule } from './media/media.module';
 import { config } from './config/config';
@@ -37,6 +38,7 @@ import { config } from './config/config';
     CatalogModule,
     OrdersModule,
     PaymentsModule,
+    ShippingModule,
     GeoModule,
     MediaModule,
     AuthModule,

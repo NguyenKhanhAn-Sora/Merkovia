@@ -347,7 +347,12 @@ export class AccountService {
                 recipientPhone: phone,
                 street: dto.street?.trim(),
                 ward: dto.ward?.trim(),
+                wardCode: dto.wardCode,
                 province: dto.city?.trim(),
+                // Mã tỉnh + toạ độ là đầu ĐẾN khi tính cước vận chuyển.
+                provinceCode: dto.provinceCode,
+                lat: dto.lat,
+                lng: dto.lng,
                 country: dto.country?.trim() || 'Việt Nam',
                 isDefault: true,
               },
@@ -478,7 +483,12 @@ export class AccountService {
               pickupAddress: {
                 street: dto.street?.trim(),
                 ward: dto.ward?.trim(),
+                wardCode: dto.wardCode,
                 province: dto.city?.trim(),
+                // Mã tỉnh + toạ độ là đầu ĐI khi tính cước vận chuyển.
+                provinceCode: dto.provinceCode,
+                lat: dto.lat,
+                lng: dto.lng,
                 country: dto.country?.trim() || 'Việt Nam',
               },
               logoUrl: dto.logoUrl || SHOP_DEFAULT_LOGO,
@@ -576,7 +586,11 @@ export class AccountService {
         pickupAddress: {
           street: shop.pickupAddress?.street,
           ward: shop.pickupAddress?.ward,
+          wardCode: shop.pickupAddress?.wardCode,
           province: shop.pickupAddress?.province,
+          provinceCode: shop.pickupAddress?.provinceCode,
+          lat: shop.pickupAddress?.lat,
+          lng: shop.pickupAddress?.lng,
           country: shop.pickupAddress?.country,
         },
         // null = đổi tên được ngay; có giá trị ở tương lai = đang trong 30 ngày chờ.
@@ -680,10 +694,20 @@ export class AccountService {
       dto.city !== undefined ||
       dto.country !== undefined
     ) {
+      // Đổi tỉnh/thành thì mã phường và toạ độ cũ chắc chắn không còn đúng —
+      // giữ lại sẽ tính cước theo một nơi khác hẳn địa chỉ đang hiển thị.
+      const provinceChanged =
+        dto.city !== undefined &&
+        dto.city.trim() !== (shop.pickupAddress?.province ?? '');
+
       shop.pickupAddress = {
         street: dto.street?.trim() ?? shop.pickupAddress?.street,
         ward: dto.ward?.trim() ?? shop.pickupAddress?.ward,
+        wardCode: dto.wardCode ?? (provinceChanged ? undefined : shop.pickupAddress?.wardCode),
         province: dto.city?.trim() ?? shop.pickupAddress?.province,
+        provinceCode: dto.provinceCode ?? (provinceChanged ? undefined : shop.pickupAddress?.provinceCode),
+        lat: dto.lat ?? (provinceChanged ? undefined : shop.pickupAddress?.lat),
+        lng: dto.lng ?? (provinceChanged ? undefined : shop.pickupAddress?.lng),
         country: dto.country?.trim() || shop.pickupAddress?.country || 'Việt Nam',
       };
     }
@@ -752,7 +776,12 @@ export class AccountService {
               pickupAddress: {
                 street: dto.street?.trim(),
                 ward: dto.ward?.trim(),
+                wardCode: dto.wardCode,
                 province: dto.city?.trim(),
+                // Mã tỉnh + toạ độ là đầu ĐI khi tính cước vận chuyển.
+                provinceCode: dto.provinceCode,
+                lat: dto.lat,
+                lng: dto.lng,
                 country: dto.country?.trim() || 'Việt Nam',
               },
               logoUrl: dto.logoUrl || SHOP_DEFAULT_LOGO,

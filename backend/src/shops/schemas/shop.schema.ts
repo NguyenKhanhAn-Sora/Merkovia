@@ -27,8 +27,22 @@ export class PickupAddress {
   @Prop({ trim: true })
   ward?: string;
 
+  @Prop()
+  wardCode?: number;
+
   @Prop({ trim: true })
   province?: string;
+
+  /** Mã tỉnh/thành — điểm ĐI để tính cước vận chuyển. */
+  @Prop()
+  provinceCode?: number;
+
+  /** Toạ độ kho lấy hàng; có thì tính cước theo khoảng cách thật. */
+  @Prop()
+  lat?: number;
+
+  @Prop()
+  lng?: number;
 
   @Prop({ trim: true, default: 'Việt Nam' })
   country: string;

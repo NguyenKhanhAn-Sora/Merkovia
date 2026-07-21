@@ -112,11 +112,24 @@ export class ShippingAddress {
   @Prop({ trim: true })
   ward?: string;
 
+  @Prop()
+  wardCode?: number;
+
   @Prop({ trim: true })
   district?: string;
 
   @Prop({ trim: true, required: true })
   province: string;
+
+  @Prop()
+  provinceCode?: number;
+
+  /* Toạ độ chụp lại theo đơn — dùng để tạo vận đơn và đối chiếu về sau. */
+  @Prop()
+  lat?: number;
+
+  @Prop()
+  lng?: number;
 
   @Prop({ trim: true, default: 'Việt Nam' })
   country: string;

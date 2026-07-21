@@ -3,6 +3,8 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsLatitude,
+  IsLongitude,
   IsOptional,
   IsString,
   Matches,
@@ -89,6 +91,29 @@ export class UpdateShopDto {
   @IsString()
   @MaxLength(100)
   city?: string;
+
+  /** Mã hành chính + toạ độ kho lấy hàng — đầu ĐI để tính cước vận chuyển. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  provinceCode?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  wardCode?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsLatitude()
+  lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsLongitude()
+  lng?: number;
 
   @IsOptional()
   @IsString()

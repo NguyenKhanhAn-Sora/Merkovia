@@ -37,6 +37,17 @@ export class OrdersController {
     return this.orders.checkoutInfo(user);
   }
 
+  /**
+   * Báo giá giỏ hàng (tiền hàng + cước vận chuyển) trước khi đặt.
+   * Chỉ đọc, không giữ kho — trang thanh toán gọi lại mỗi khi đổi địa chỉ.
+   */
+  @Post('quote')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  quote(@CurrentUser() user: UserDocument, @Body() dto: CreateOrderDto) {
+    return this.orders.quote(user, dto);
+  }
+
   @Post()
   // Siết chặt hơn các route khác: đây là route ghi dữ liệu và trừ kho.
   @Throttle({ default: { limit: 20, ttl: 60_000 } })

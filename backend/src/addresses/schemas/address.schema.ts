@@ -30,13 +30,37 @@ export class Address {
   @Prop({ trim: true })
   ward?: string;
 
-  /** Quận/Huyện. */
+  /**
+   * Mã phường/xã theo danh mục hành chính.
+   *
+   * 🔴 Phải lưu MÃ chứ không chỉ tên: tên phường có thể đổi hoặc sáp nhập,
+   * lúc đó địa chỉ cũ thành mồ côi không tra ngược được. Mã cũng là thứ đơn vị
+   * vận chuyển yêu cầu để tính cước và tạo vận đơn.
+   */
+  @Prop()
+  wardCode?: number;
+
+  /** Quận/Huyện (dữ liệu cũ; cấu trúc hành chính hiện tại chỉ còn 2 cấp). */
   @Prop({ trim: true })
   district?: string;
 
   /** Tỉnh/Thành phố. */
   @Prop({ trim: true })
   province?: string;
+
+  @Prop()
+  provinceCode?: number;
+
+  /**
+   * Toạ độ lấy từ dịch vụ bản đồ khi người dùng chọn gợi ý địa chỉ.
+   * Đây mới là thứ tính được phí ship theo khoảng cách; thiếu thì hệ thống
+   * lùi về tính theo vùng hành chính.
+   */
+  @Prop()
+  lat?: number;
+
+  @Prop()
+  lng?: number;
 
   @Prop({ trim: true, default: 'VN' })
   country: string;

@@ -2,15 +2,19 @@ import {
   IsDateString,
   IsEmail,
   IsIn,
+  IsInt,
+  IsLatitude,
+  IsLongitude,
   IsObject,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
+  Min,
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { GENDERS } from '../../profiles/schemas/profile.schema';
 
 /**
@@ -95,6 +99,29 @@ export class RegisterDto {
   @IsString()
   @MaxLength(200)
   street?: string;
+
+  /** Mã hành chính + toạ độ — đầu ĐẾN để tính cước vận chuyển. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  provinceCode?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  wardCode?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsLatitude()
+  lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsLongitude()
+  lng?: number;
 
   @IsOptional()
   @IsString()

@@ -5,6 +5,8 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsLatitude,
+  IsLongitude,
   IsMongoId,
   IsOptional,
   IsString,
@@ -39,6 +41,33 @@ export class ShippingAddressDto {
   @MinLength(2)
   @MaxLength(80)
   recipientName: string;
+
+  /**
+   * Mã hành chính + toạ độ — đầu vào để tính cước vận chuyển.
+   * Optional vì địa chỉ nhập tay (không chọn từ gợi ý) vẫn phải đặt hàng được;
+   * thiếu thì biểu cước lùi về mức liên tỉnh thay vì từ chối đơn.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  provinceCode?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  wardCode?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsLatitude()
+  lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsLongitude()
+  lng?: number;
 
   @IsString()
   @MinLength(8)
