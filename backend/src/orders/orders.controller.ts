@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, QuoteCartDto } from './dto/create-order.dto';
 import {
   CancelOrderDto,
   QueryOrdersDto,
@@ -44,7 +44,7 @@ export class OrdersController {
   @Post('quote')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
-  quote(@CurrentUser() user: UserDocument, @Body() dto: CreateOrderDto) {
+  quote(@CurrentUser() user: UserDocument, @Body() dto: QuoteCartDto) {
     return this.orders.quote(user, dto);
   }
 

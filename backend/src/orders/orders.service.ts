@@ -30,10 +30,28 @@ import {
   ShippingProvider,
   type ShippingQuote,
 } from '../shipping/shipping.provider';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, QuoteCartDto } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { shortId } from '../common/text';
 import type { UserDocument } from '../users/schemas/user.schema';
+
+/**
+ * Phần giỏ hàng mà `buildGroups` thực sự cần.
+ *
+ * Khai báo tối thiểu như vậy để cả `QuoteCartDto` (chỉ có thông tin địa lý) và
+ * `CreateOrderDto` (đầy đủ người nhận) đều dùng chung được một đường tính —
+ * đó là thứ bảo đảm giá báo cho người mua đúng bằng giá bị trừ.
+ */
+interface CartInput {
+  items: { productId: string; variantId: string; quantity: number }[];
+  shippingAddress: {
+    provinceCode?: number;
+    wardCode?: number;
+    lat?: number;
+    lng?: number;
+  };
+  paymentMethod: string;
+}
 
 /** Thời gian giữ kho cho đơn chờ thanh toán online. */
 const PAYMENT_WINDOW_MINUTES = 15;
@@ -131,7 +149,7 @@ export class OrdersService {
    *
    * Không giữ kho, không ghi gì.
    */
-  async quote(user: UserDocument, dto: CreateOrderDto) {
+  async quote(user: UserDocument, dto: QuoteCartDto) {
     const { groups } = await this.buildGroups(user, dto);
 
     const shops = groups.map((g) => ({
@@ -299,7 +317,7 @@ export class OrdersService {
    * Mọi giá tiền ở đây đọc từ DB, không lấy từ payload. Mọi lý do từ chối đều
    * nói rõ tên sản phẩm để người mua biết phải sửa dòng nào.
    */
-  private async buildGroups(user: UserDocument, dto: CreateOrderDto) {
+  private async buildGroups(user: UserDocument, dto: CartInput) {
     // Gộp dòng trùng (cùng sản phẩm + cùng phân loại) để không giữ kho hai lần
     // cho một món — client có thể gửi lên hai dòng giống nhau.
     const merged = new Map<string, { productId: string; variantId: string; quantity: number }>();

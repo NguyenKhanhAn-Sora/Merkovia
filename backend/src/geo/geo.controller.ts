@@ -28,6 +28,22 @@ class AutocompleteDto {
   lng?: number;
 }
 
+class ReverseDto {
+  @Type(() => Number)
+  @IsLatitude({ message: 'Vĩ độ không hợp lệ.' })
+  lat: number;
+
+  @Type(() => Number)
+  @IsLongitude({ message: 'Kinh độ không hợp lệ.' })
+  lng: number;
+}
+
+class LocateDto {
+  @IsString({ message: 'Địa chỉ không hợp lệ.' })
+  @MaxLength(200, { message: 'Địa chỉ quá dài.' })
+  address: string;
+}
+
 @Controller('geo')
 export class GeoController {
   constructor(
@@ -67,6 +83,23 @@ export class GeoController {
       suggestions: await this.places.autocomplete(query.q, location),
       enabled: this.places.enabled,
     };
+  }
+
+  /**
+   * Toạ độ → địa chỉ. Dùng khi người dùng ghim vị trí trên bản đồ.
+   * Đặt TRƯỚC `places/:placeId` để không bị route đó nuốt mất.
+   */
+  @Get('places/reverse')
+  @Throttle({ default: { limit: 90, ttl: 60_000 } })
+  async reverse(@Query() query: ReverseDto) {
+    return { place: await this.places.reverse(query.lat, query.lng) };
+  }
+
+  /** Địa chỉ → toạ độ, để mở bản đồ đúng khu vực đã chọn. */
+  @Get('places/locate')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  async locate(@Query() query: LocateDto) {
+    return { location: await this.places.geocode(query.address) };
   }
 
   @Get('places/:placeId')

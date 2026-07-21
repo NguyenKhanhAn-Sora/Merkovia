@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { deaccent } from '../common/text';
 
 export interface GeoItem {
   code: number;
@@ -70,5 +71,39 @@ export class GeoService {
     const wards = (data.wards ?? []).map((w) => ({ code: w.code, name: w.name }));
     this.wards.set(provinceCode, wards);
     return wards;
+  }
+
+  /* ------------------------- Tra mã ngược từ tên ------------------------- */
+
+  /**
+   * Tìm mã từ tên đơn vị hành chính.
+   *
+   * So khớp sau khi bỏ dấu và bỏ tiền tố hành chính, vì cùng một nơi có thể
+   * được ghi là "Thành phố Hồ Chí Minh", "TP Hồ Chí Minh" hay "Hồ Chí Minh"
+   * tuỳ thời điểm nhập.
+   */
+  private matchByName(list: GeoItem[], name: string): number | undefined {
+    const norm = (s: string) =>
+      deaccent(s)
+        .replace(/^(thanh pho|tinh|phuong|xa|thi tran|quan|huyen|tp\.?)\s+/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const target = norm(name);
+    if (!target) return undefined;
+    return list.find((item) => norm(item.name) === target)?.code;
+  }
+
+  async resolveProvinceCode(name?: string): Promise<number | undefined> {
+    if (!name?.trim()) return undefined;
+    return this.matchByName(await this.getProvinces(), name);
+  }
+
+  async resolveWardCode(
+    provinceCode: number,
+    name?: string,
+  ): Promise<number | undefined> {
+    if (!name?.trim()) return undefined;
+    return this.matchByName(await this.getWards(provinceCode), name);
   }
 }

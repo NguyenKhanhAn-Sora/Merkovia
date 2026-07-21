@@ -112,8 +112,23 @@ export const config = {
    * kiểm chứng trong khi không có gì được kiểm cả.
    */
   goong: {
+    /** Khoá REST — CHỈ dùng ở server (gợi ý địa chỉ, tra toạ độ). */
     apiKey: optional('GOONG_API_KEY', ''),
     baseUrl: optional('GOONG_BASE_URL', 'https://rsapi.goong.io'),
+
+    /**
+     * Khoá maptiles — trình duyệt gọi thẳng để tải ảnh bản đồ nên BẮT BUỘC lộ
+     * ra client, đây là thiết kế của nhà cung cấp (giống public token của
+     * Mapbox). Vì thế phải là khoá RIÊNG, không dùng chung với `apiKey`, và
+     * nên giới hạn theo tên miền trong bảng điều khiển Goong.
+     */
+    mapTilesKey: optional('GOONG_MAPTILES_KEY', ''),
+
+    /** Để trong config phòng khi nhà cung cấp đổi đường dẫn style. */
+    mapStyleUrl: optional(
+      'GOONG_MAP_STYLE_URL',
+      'https://tiles.goong.io/assets/goong_map_web.json',
+    ),
   },
 
   // URL app người mua — cổng thanh toán dùng để đưa khách quay về sau khi trả.

@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { config } from './config/config';
+import { vietnameseValidationError } from './common/validation-messages';
 
 async function bootstrap() {
   // `rawBody` giữ lại thân request nguyên byte — bắt buộc để xác thực chữ ký
@@ -29,6 +30,10 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      // Dịch lỗi sang tiếng Việt: mặc định class-validator trả câu tiếng Anh
+      // ("recipientName must be longer than…") và câu đó hiện thẳng lên màn
+      // hình người dùng. Thông báo tự viết trong DTO vẫn được giữ nguyên.
+      exceptionFactory: vietnameseValidationError,
     }),
   )
 

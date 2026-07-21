@@ -15,6 +15,12 @@ export interface PlaceDetail {
   address: string;
   lat: number;
   lng: number;
+  /**
+   * Đơn vị hành chính tại điểm đó, nếu nhà cung cấp trả về.
+   * Dùng để cảnh báo khi người dùng ghim vào một tỉnh khác với tỉnh họ đã
+   * chọn — sai tỉnh là sai luôn cước vận chuyển và có khi không giao được.
+   */
+  compound?: { province?: string; district?: string; commune?: string };
 }
 
 /* Hình dạng phản hồi của Goong (tương thích Google Places). */
@@ -34,6 +40,14 @@ interface GoongDetailRes {
     formatted_address?: string;
     geometry?: { location?: { lat: number; lng: number } };
   };
+}
+interface GoongGeocodeRes {
+  results?: {
+    place_id?: string;
+    formatted_address?: string;
+    geometry?: { location?: { lat: number; lng: number } };
+    compound?: { province?: string; district?: string; commune?: string };
+  }[];
 }
 
 /**
@@ -56,7 +70,19 @@ export class PlacesService {
   }
 
   get info() {
-    return { enabled: this.enabled, provider: this.enabled ? 'Goong' : null };
+    return {
+      enabled: this.enabled,
+      provider: this.enabled ? 'Goong' : null,
+      /**
+       * Bản đồ tương tác cần khoá RIÊNG (maptiles) do trình duyệt gọi thẳng,
+       * khác khoá REST chỉ dùng ở server. Thiếu khoá này thì nút "Chọn trên
+       * bản đồ" tự ẩn — gợi ý gõ chữ vẫn dùng bình thường.
+       */
+      mapEnabled: !!config.goong.mapTilesKey,
+      mapStyleUrl: config.goong.mapTilesKey
+        ? `${config.goong.mapStyleUrl}?api_key=${config.goong.mapTilesKey}`
+        : null,
+    };
   }
 
   private async call<T>(path: string, params: Record<string, string>): Promise<T> {
@@ -104,6 +130,47 @@ export class PlacesService {
       secondary: p.structured_formatting?.secondary_text ?? '',
       description: p.description,
     }));
+  }
+
+  /**
+   * Toạ độ → địa chỉ (reverse geocoding).
+   *
+   * Đây là thứ làm nên tính năng "chọn vị trí trên bản đồ": người dùng kéo bản
+   * đồ tới đúng nhà mình, hệ thống tự điền địa chỉ. Cần cho các địa chỉ mà gõ
+   * chữ không ra — hẻm sâu, nhà trong ngõ, chung cư mới.
+   */
+  async reverse(lat: number, lng: number): Promise<PlaceDetail | null> {
+    if (!this.enabled) return null;
+
+    const data = await this.call<GoongGeocodeRes>('/Geocode', {
+      latlng: `${lat},${lng}`,
+    });
+    const first = data.results?.[0];
+    if (!first) return null;
+
+    return {
+      placeId: first.place_id ?? '',
+      address: first.formatted_address ?? '',
+      // Trả lại đúng toạ độ người dùng đã chọn, KHÔNG lấy toạ độ của kết quả:
+      // họ ghim đúng cửa nhà mình, còn kết quả có thể là tâm cả con đường.
+      lat,
+      lng,
+      compound: first.compound,
+    };
+  }
+
+  /**
+   * Địa chỉ → toạ độ (geocoding thuận).
+   * Dùng để mở bản đồ đúng khu vực người dùng đã chọn thay vì rơi giữa Việt Nam.
+   */
+  async geocode(address: string): Promise<{ lat: number; lng: number } | null> {
+    if (!this.enabled || !address.trim()) return null;
+
+    const data = await this.call<GoongGeocodeRes>('/Geocode', {
+      address: address.trim(),
+    });
+    const loc = data.results?.[0]?.geometry?.location;
+    return loc ? { lat: loc.lat, lng: loc.lng } : null;
   }
 
   /** Chi tiết một gợi ý — đây là chỗ lấy được toạ độ. */

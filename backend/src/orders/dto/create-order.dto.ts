@@ -17,6 +17,13 @@ import {
 } from 'class-validator';
 import { PAYMENT_METHODS } from '../schemas/order.schema';
 
+/*
+ * Mọi thông báo lỗi ở đây đều viết bằng TIẾNG VIỆT và nói rõ phải sửa gì.
+ * class-validator mặc định trả câu tiếng Anh kiểu "recipientName must be
+ * longer than or equal to 2 characters" — thứ hiện thẳng lên màn hình người
+ * mua thì họ không hiểu và cũng không biết sửa ô nào.
+ */
+
 /**
  * Một dòng hàng người mua gửi lên.
  *
@@ -24,95 +31,122 @@ import { PAYMENT_METHODS } from '../schemas/order.schema';
  * server, nếu không ai cũng có thể sửa localStorage để mua giá 1 đồng.
  */
 export class OrderItemDto {
-  @IsMongoId()
+  @IsMongoId({ message: 'Sản phẩm không hợp lệ.' })
   productId: string;
 
-  @IsMongoId()
+  @IsMongoId({ message: 'Phân loại sản phẩm không hợp lệ.' })
   variantId: string;
 
-  @IsInt()
-  @Min(1)
   @Type(() => Number)
+  @IsInt({ message: 'Số lượng phải là số nguyên.' })
+  @Min(1, { message: 'Số lượng phải lớn hơn 0.' })
   quantity: number;
 }
 
-export class ShippingAddressDto {
-  @IsString()
-  @MinLength(2)
-  @MaxLength(80)
-  recipientName: string;
+/**
+ * Phần ĐỊA LÝ của địa chỉ — chỉ những gì cần để tính cước vận chuyển.
+ *
+ * Tách riêng khỏi thông tin người nhận vì trang thanh toán phải báo giá được
+ * NGAY khi chọn xong tỉnh/thành, lúc người mua còn chưa gõ tên. Gộp chung thì
+ * họ bị báo "thiếu tên người nhận" trong ô phí vận chuyển — vừa sai chỗ vừa
+ * khó hiểu.
+ */
+export class ShippingGeoDto {
+  @IsString({ message: 'Vui lòng chọn tỉnh/thành phố.' })
+  @MinLength(2, { message: 'Vui lòng chọn tỉnh/thành phố.' })
+  @MaxLength(100, { message: 'Tên tỉnh/thành phố quá dài.' })
+  province: string;
 
   /**
-   * Mã hành chính + toạ độ — đầu vào để tính cước vận chuyển.
+   * Mã hành chính + toạ độ — đầu vào để tính cước.
    * Optional vì địa chỉ nhập tay (không chọn từ gợi ý) vẫn phải đặt hàng được;
    * thiếu thì biểu cước lùi về mức liên tỉnh thay vì từ chối đơn.
    */
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'Mã tỉnh/thành không hợp lệ.' })
+  @Min(1, { message: 'Mã tỉnh/thành không hợp lệ.' })
   provinceCode?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'Mã phường/xã không hợp lệ.' })
+  @Min(1, { message: 'Mã phường/xã không hợp lệ.' })
   wardCode?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsLatitude()
+  @IsLatitude({ message: 'Toạ độ địa chỉ không hợp lệ.' })
   lat?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsLongitude()
+  @IsLongitude({ message: 'Toạ độ địa chỉ không hợp lệ.' })
   lng?: number;
 
-  @IsString()
-  @MinLength(8)
-  @MaxLength(20)
+  @IsOptional()
+  @IsString({ message: 'Phường/xã không hợp lệ.' })
+  @MaxLength(100, { message: 'Tên phường/xã quá dài.' })
+  ward?: string;
+}
+
+/** Địa chỉ giao hàng đầy đủ — chỉ bắt buộc đủ khi THỰC SỰ đặt hàng. */
+export class ShippingAddressDto extends ShippingGeoDto {
+  @IsString({ message: 'Vui lòng nhập họ tên người nhận.' })
+  @MinLength(2, { message: 'Họ tên người nhận phải có ít nhất 2 ký tự.' })
+  @MaxLength(80, { message: 'Họ tên người nhận tối đa 80 ký tự.' })
+  recipientName: string;
+
+  @IsString({ message: 'Vui lòng nhập số điện thoại người nhận.' })
+  @MinLength(8, { message: 'Số điện thoại phải có ít nhất 8 chữ số.' })
+  @MaxLength(20, { message: 'Số điện thoại tối đa 20 ký tự.' })
   recipientPhone: string;
 
-  @IsString()
-  @MinLength(3)
-  @MaxLength(200)
+  @IsString({ message: 'Vui lòng nhập địa chỉ chi tiết.' })
+  @MinLength(3, { message: 'Địa chỉ chi tiết phải có ít nhất 3 ký tự.' })
+  @MaxLength(200, { message: 'Địa chỉ chi tiết tối đa 200 ký tự.' })
   street: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  ward?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
+  @IsString({ message: 'Quận/huyện không hợp lệ.' })
+  @MaxLength(100, { message: 'Tên quận/huyện quá dài.' })
   district?: string;
-
-  @IsString()
-  @MinLength(2)
-  @MaxLength(100)
-  province: string;
 }
 
-export class CreateOrderDto {
-  @IsArray()
-  @ArrayNotEmpty()
-  @ArrayMaxSize(50)
+/** Phần chung của giỏ hàng, dùng cho cả báo giá lẫn đặt hàng. */
+class CartBaseDto {
+  @IsArray({ message: 'Giỏ hàng không hợp lệ.' })
+  @ArrayNotEmpty({ message: 'Giỏ hàng đang trống.' })
+  @ArrayMaxSize(50, { message: 'Mỗi lần đặt tối đa 50 sản phẩm.' })
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
   items: OrderItemDto[];
 
+  @IsIn(PAYMENT_METHODS, {
+    message: 'Phương thức thanh toán không hợp lệ.',
+  })
+  paymentMethod: string;
+}
+
+/**
+ * Báo giá giỏ hàng — CHỈ cần thông tin địa lý.
+ * Không đòi tên/SĐT/địa chỉ chi tiết: người mua vừa chọn tỉnh là thấy được
+ * cước ngay, không phải điền xong hết mới biết mình phải trả bao nhiêu.
+ */
+export class QuoteCartDto extends CartBaseDto {
+  @ValidateNested()
+  @Type(() => ShippingGeoDto)
+  shippingAddress: ShippingGeoDto;
+}
+
+export class CreateOrderDto extends CartBaseDto {
   @ValidateNested()
   @Type(() => ShippingAddressDto)
   shippingAddress: ShippingAddressDto;
 
-  @IsIn(PAYMENT_METHODS)
-  paymentMethod: string;
-
   @IsOptional()
-  @IsString()
-  @MaxLength(500)
+  @IsString({ message: 'Lời nhắn không hợp lệ.' })
+  @MaxLength(500, { message: 'Lời nhắn tối đa 500 ký tự.' })
   note?: string;
 
   /**
