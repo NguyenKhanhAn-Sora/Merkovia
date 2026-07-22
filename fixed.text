@@ -8,3 +8,7 @@
 trong trường hợp nào thì user được phép sửa những gì của đơn hàng
 - khi buyer vào lịch sử đơn hàng, đơn nào đã giao thành côn rồi thì có button yêu cầu trả
 hàng trong vòng 7 ngày
+- dropdown hồ sơ pháp lý của seller trong chỉnh sửa hồ sơ bị che khuất bởi 
+panel bên dưới
+- thử test đánh giá 1 sản phẩm và qua bên seller xem có hiển thị trong trang 
+đánh giá không

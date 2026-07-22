@@ -43,6 +43,24 @@ export class ReviewsController {
     return this.reviews.create(user, dto);
   }
 
+  /**
+   * Dòng hàng đã đánh giá của NHIỀU đơn cùng lúc.
+   *
+   * Đặt TRƯỚC `mine/:orderId` kẻo bị route đó nuốt. Trang danh sách đơn cần
+   * biết đơn nào còn món chưa đánh giá — hỏi từng đơn là mỗi lần mở trang lại
+   * thêm chục request.
+   */
+  @Get('mine')
+  mineBatch(
+    @CurrentUser() user: UserDocument,
+    @Query('orderIds') orderIds?: string,
+  ) {
+    return this.reviews.myReviewsForOrders(
+      user,
+      (orderIds ?? '').split(',').filter(Boolean),
+    );
+  }
+
   /** Những dòng hàng trong đơn mà mình đã đánh giá. */
   @Get('mine/:orderId')
   mine(@CurrentUser() user: UserDocument, @Param('orderId') orderId: string) {
@@ -57,10 +75,7 @@ export class ShopReviewsController {
   constructor(private readonly reviews: ReviewsService) {}
 
   @Get()
-  list(
-    @CurrentUser() user: UserDocument,
-    @Query() query: ListShopReviewsDto,
-  ) {
+  list(@CurrentUser() user: UserDocument, @Query() query: ListShopReviewsDto) {
     return this.reviews.listForShop(user, query);
   }
 

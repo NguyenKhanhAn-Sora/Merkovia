@@ -80,9 +80,7 @@ export class ReviewsService {
       );
     }
 
-    const item = order.items.find(
-      (i) => String(i.variant) === dto.variantId,
-    );
+    const item = order.items.find((i) => String(i.variant) === dto.variantId);
     if (!item) {
       throw new NotFoundException('Sản phẩm này không có trong đơn hàng.');
     }
@@ -125,7 +123,8 @@ export class ReviewsService {
   async myReviewsForOrder(user: UserDocument, orderId: string) {
     if (!Types.ObjectId.isValid(orderId)) return { reviews: [] };
     const reviews = await this.reviewModel
-      .find({ order: orderId, buyer: user._id })
+      // ObjectId chứ không phải chuỗi — xem chú thích ở `listForProduct`.
+      .find({ order: new Types.ObjectId(orderId), buyer: user._id })
       .lean();
     return {
       reviews: reviews.map((r) => ({
@@ -136,6 +135,26 @@ export class ReviewsService {
     };
   }
 
+  /** Như trên nhưng cho nhiều đơn — trang danh sách hỏi MỘT lượt. */
+  async myReviewsForOrders(user: UserDocument, orderIds: string[]) {
+    const ids = orderIds
+      .filter((id) => Types.ObjectId.isValid(id))
+      .slice(0, 50) // trang danh sách không bao giờ hiện quá chừng này
+      .map((id) => new Types.ObjectId(id));
+    if (ids.length === 0) return { reviewed: {} };
+
+    const reviews = await this.reviewModel
+      .find({ order: { $in: ids }, buyer: user._id })
+      .select('order variant')
+      .lean();
+
+    const reviewed: Record<string, string[]> = {};
+    for (const r of reviews) {
+      (reviewed[String(r.order)] ??= []).push(String(r.variant));
+    }
+    return { reviewed };
+  }
+
   /* ----------------------------- Công khai ------------------------------ */
 
   /** Danh sách đánh giá của một sản phẩm. */
@@ -144,7 +163,15 @@ export class ReviewsService {
       throw new NotFoundException('Không tìm thấy sản phẩm.');
     }
 
-    const filter: Record<string, unknown> = { product: productId };
+    /**
+     * 🔴 Ép sang ObjectId, KHÔNG để nguyên chuỗi. Mongoose ép kiểu chuỗi cho
+     * `_id` nhưng không cho các đường dẫn tham chiếu như `product` — truyền
+     * chuỗi thì truy vấn trả về RỖNG mà chẳng báo lỗi gì, nhìn hệt như "sản
+     * phẩm chưa có đánh giá nào".
+     */
+    const filter: Record<string, unknown> = {
+      product: new Types.ObjectId(productId),
+    };
     if (query.rating) filter.rating = query.rating;
     // `$ne: []` chứ không phải `$exists`: mảng rỗng vẫn tồn tại.
     if (query.hasMedia === 'true') filter.media = { $ne: [] };
@@ -255,81 +282,84 @@ export class ReviewsService {
    */
   private async applyRatingDelta(productId: Types.ObjectId, delta: number[]) {
     try {
-      await this.productModel.updateOne({ _id: productId }, [
-        {
-          $set: {
-            'stats.ratingBreakdown': {
-              $map: {
-                input: { $range: [0, 5] },
-                as: 'i',
-                in: {
-                  // Không bao giờ xuống dưới 0: dữ liệu cũ có thể thiếu ô,
-                  // và một lần trừ hụt sẽ làm hỏng vĩnh viễn con số.
-                  $max: [
-                    0,
-                    {
-                      $add: [
-                        {
-                          $ifNull: [
-                            {
-                              $arrayElemAt: [
-                                { $ifNull: ['$stats.ratingBreakdown', []] },
-                                '$$i',
-                              ],
-                            },
-                            0,
-                          ],
-                        },
-                        { $arrayElemAt: [delta, '$$i'] },
-                      ],
-                    },
-                  ],
+      await this.productModel.updateOne(
+        { _id: productId },
+        [
+          {
+            $set: {
+              'stats.ratingBreakdown': {
+                $map: {
+                  input: { $range: [0, 5] },
+                  as: 'i',
+                  in: {
+                    // Không bao giờ xuống dưới 0: dữ liệu cũ có thể thiếu ô,
+                    // và một lần trừ hụt sẽ làm hỏng vĩnh viễn con số.
+                    $max: [
+                      0,
+                      {
+                        $add: [
+                          {
+                            $ifNull: [
+                              {
+                                $arrayElemAt: [
+                                  { $ifNull: ['$stats.ratingBreakdown', []] },
+                                  '$$i',
+                                ],
+                              },
+                              0,
+                            ],
+                          },
+                          { $arrayElemAt: [delta, '$$i'] },
+                        ],
+                      },
+                    ],
+                  },
                 },
               },
             },
           },
-        },
-        {
-          $set: {
-            'stats.ratingCount': { $sum: '$stats.ratingBreakdown' },
-            'stats.ratingAvg': {
-              $let: {
-                vars: {
-                  count: { $sum: '$stats.ratingBreakdown' },
-                  weighted: {
-                    $sum: {
-                      $map: {
-                        input: { $range: [0, 5] },
-                        as: 'i',
-                        in: {
-                          $multiply: [
-                            {
-                              $arrayElemAt: [
-                                '$stats.ratingBreakdown',
-                                '$$i',
-                              ],
-                            },
-                            { $add: ['$$i', 1] },
-                          ],
+          {
+            $set: {
+              'stats.ratingCount': { $sum: '$stats.ratingBreakdown' },
+              'stats.ratingAvg': {
+                $let: {
+                  vars: {
+                    count: { $sum: '$stats.ratingBreakdown' },
+                    weighted: {
+                      $sum: {
+                        $map: {
+                          input: { $range: [0, 5] },
+                          as: 'i',
+                          in: {
+                            $multiply: [
+                              {
+                                $arrayElemAt: ['$stats.ratingBreakdown', '$$i'],
+                              },
+                              { $add: ['$$i', 1] },
+                            ],
+                          },
                         },
                       },
                     },
                   },
-                },
-                in: {
-                  $cond: [
-                    { $gt: ['$$count', 0] },
-                    {
-                      $round: [{ $divide: ['$$weighted', '$$count'] }, 1],
-                    },
-                    0,
-                  ],
+                  in: {
+                    $cond: [
+                      { $gt: ['$$count', 0] },
+                      {
+                        $round: [{ $divide: ['$$weighted', '$$count'] }, 1],
+                      },
+                      0,
+                    ],
+                  },
                 },
               },
             },
           },
-        },
-      ]);
+        ],
+        // 🔴 Mongoose từ chối mảng làm nội dung cập nhật nếu thiếu cờ này —
+        // nó không đoán được ta muốn dùng pipeline hay vô tình truyền nhầm.
+        { updatePipeline: true },
+      );
     } catch (err: unknown) {
       this.logger.warn(`Không cập nhật được điểm sao: ${String(err)}`);
     }
