@@ -92,6 +92,12 @@ export class ShippingGeoDto {
 
 /** Địa chỉ giao hàng đầy đủ — chỉ bắt buộc đủ khi THỰC SỰ đặt hàng. */
 export class ShippingAddressDto extends ShippingGeoDto {
+  /** Loại địa điểm giao — ảnh hưởng giờ giao được, nên chụp lại theo đơn. */
+  @IsOptional()
+  @IsString({ message: 'Loại địa chỉ không hợp lệ.' })
+  @MaxLength(30, { message: 'Loại địa chỉ tối đa 30 ký tự.' })
+  label?: string;
+
   @IsString({ message: 'Vui lòng nhập họ tên người nhận.' })
   @MinLength(2, { message: 'Họ tên người nhận phải có ít nhất 2 ký tự.' })
   @MaxLength(80, { message: 'Họ tên người nhận tối đa 80 ký tự.' })

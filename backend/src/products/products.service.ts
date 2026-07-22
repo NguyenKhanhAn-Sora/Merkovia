@@ -439,7 +439,17 @@ export class ProductsService {
             },
           },
         },
-        { $inc: { 'variants.$[v].stock': -item.quantity } },
+        // 🔴 Phải trừ CẢ `totalStock`: đó là con số dùng để lọc "Hết hàng" và
+        // hiện lên thẻ sản phẩm. Chỉ trừ trong biến thể thì hàng bán sạch rồi
+        // mà ngoài trang vẫn báo còn, người mua đặt xong mới bị từ chối.
+        // Biến thể ở đây chắc chắn đang bán (điều kiện `isActive` phía trên)
+        // nên nó có góp vào `totalStock`, trừ đi là đúng.
+        {
+          $inc: {
+            'variants.$[v].stock': -item.quantity,
+            totalStock: -item.quantity,
+          },
+        },
         { arrayFilters: [{ 'v._id': item.variantId }] },
       );
 
@@ -509,7 +519,13 @@ export class ProductsService {
     for (const item of items) {
       await this.productModel.updateOne(
         { _id: item.productId, 'variants._id': item.variantId },
-        { $inc: { 'variants.$[v].stock': item.quantity } },
+        // Trả lại đối xứng với lúc giữ kho, kể cả `totalStock`.
+        {
+          $inc: {
+            'variants.$[v].stock': item.quantity,
+            totalStock: item.quantity,
+          },
+        },
         { arrayFilters: [{ 'v._id': item.variantId }] },
       );
     }

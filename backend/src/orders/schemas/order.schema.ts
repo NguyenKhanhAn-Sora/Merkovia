@@ -100,6 +100,15 @@ const OrderItemSchema = SchemaFactory.createForClass(OrderItem);
 /** Địa chỉ giao hàng — cũng là bản chụp, người mua đổi sổ địa chỉ không ảnh hưởng đơn cũ. */
 @Schema({ _id: false })
 export class ShippingAddress {
+  /**
+   * Loại địa điểm ("Nhà riêng", "Văn phòng"…). Chụp lại theo đơn vì nó đổi
+   * được cách giao: giao tới văn phòng thì ngoài giờ hành chính là không ai
+   * nhận. Người bán cần thấy giá trị lúc ĐẶT, không phải giá trị hiện tại
+   * trong sổ địa chỉ.
+   */
+  @Prop({ trim: true })
+  label?: string;
+
   @Prop({ trim: true, required: true })
   recipientName: string;
 

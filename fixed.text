@@ -3,3 +3,8 @@
 - địa chỉ chi tiết phải là có thật trên google map và có thể tra ra được chứ không phải user nhập bừa abcxyz là được
 - vấn đề cccd của buyer và seller
 - Khi đăng các sản phẩm mới lên sẽ được cho vào trạng thái đang chờ phê duyệt và sẽ được duyệt tự động bằng AI
+
+- hỏi xem khi user muốn sửa thông tin địa chỉ đơn hàng mà seller đã xác nhận đơn rồi thì sao
+trong trường hợp nào thì user được phép sửa những gì của đơn hàng
+- khi buyer vào lịch sử đơn hàng, đơn nào đã giao thành côn rồi thì có button yêu cầu trả
+hàng trong vòng 7 ngày

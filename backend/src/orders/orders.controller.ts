@@ -97,6 +97,12 @@ export class OrdersController {
 export class ShopOrdersController {
   constructor(private readonly orders: OrdersService) {}
 
+  /** Số liệu cho trang Tổng quan. Đặt TRƯỚC `:id` kẻo bị route đó nuốt. */
+  @Get('stats')
+  stats(@CurrentUser() user: UserDocument) {
+    return this.orders.shopStats(user);
+  }
+
   @Get()
   list(@CurrentUser() user: UserDocument, @Query() query: QueryOrdersDto) {
     return this.orders.listForShop(user, query);

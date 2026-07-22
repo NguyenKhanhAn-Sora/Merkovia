@@ -64,7 +64,7 @@ export class GeoController {
   /** Giao diện hỏi trước để biết có bật ô gợi ý địa chỉ hay không. */
   @Get('places/status')
   status() {
-    return this.places.info;
+    return this.places.info();
   }
 
   /**

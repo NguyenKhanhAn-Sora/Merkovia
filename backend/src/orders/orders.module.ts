@@ -22,6 +22,8 @@ import { AuthModule } from '../auth/auth.module';
   ],
   controllers: [OrdersController, ShopOrdersController],
   providers: [OrdersService],
-  exports: [OrdersService],
+  // Mở model Order ra ngoài (như ProductsModule/ShopsModule) để module đánh
+  // giá kiểm được đơn đã giao hay chưa.
+  exports: [OrdersService, MongooseModule],
 })
 export class OrdersModule {}

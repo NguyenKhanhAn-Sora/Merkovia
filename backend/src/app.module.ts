@@ -15,8 +15,10 @@ import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { OrdersModule } from './orders/orders.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ShippingModule } from './shipping/shipping.module';
+import { AccountModule } from './account/account.module';
 import { GeoModule } from './geo/geo.module';
 import { MediaModule } from './media/media.module';
 import { config } from './config/config';
@@ -37,8 +39,10 @@ import { config } from './config/config';
     ProductsModule,
     CatalogModule,
     OrdersModule,
+    ReviewsModule,
     PaymentsModule,
     ShippingModule,
+    AccountModule,
     GeoModule,
     MediaModule,
     AuthModule,

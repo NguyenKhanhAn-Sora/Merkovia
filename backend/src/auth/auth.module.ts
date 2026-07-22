@@ -33,6 +33,9 @@ import { config } from '../config/config';
     JwtAuthGuard,
   ],
   // Module khác (products…) dùng JwtAuthGuard để bảo vệ route.
-  exports: [AccountService, JwtAuthGuard],
+  // `AuthService` mở ra cho `AccountModule` dùng chung một kho OTP: đổi số
+  // điện thoại trong trang Tài khoản phải đi qua đúng bộ đếm số lần nhập sai
+  // và cooldown gửi lại như lúc đăng ký, không dựng một luồng OTP thứ hai.
+  exports: [AccountService, AuthService, JwtAuthGuard],
 })
 export class AuthModule {}

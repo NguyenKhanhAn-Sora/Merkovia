@@ -21,6 +21,8 @@ async function bootstrap() {
       'x-device-id',
       'x-login-method',
       'x-admin-preview-token',
+      // App tự khai là buyer hay seller để nhận đúng bộ cookie phiên.
+      'x-merkovia-app',
       'x-cordigram-upload-context',
     ],
   });

@@ -6,9 +6,8 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AccountService } from './account.service';
+import { readAccessToken } from '../common/auth-scope';
 import type { UserDocument } from '../users/schemas/user.schema';
-
-const ACCESS_COOKIE = 'access_token';
 
 /** Request đã qua guard thì luôn có `user`. */
 export interface AuthedRequest extends Request {
@@ -19,6 +18,10 @@ export interface AuthedRequest extends Request {
  * Chặn mọi route cần đăng nhập: đọc access token từ cookie httpOnly, xác thực
  * (kể cả `tokenVersion` để token bị thu hồi hết hiệu lực) rồi gắn user vào request.
  * Dùng chung `AccountService.userFromAccessToken` — chỉ có MỘT nơi kiểm token.
+ *
+ * Cookie đọc theo APP gửi request: người mua và người bán có hai bộ cookie
+ * riêng nên đăng nhập được hai tài khoản khác nhau cùng lúc. Xem
+ * `common/auth-scope.ts`.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -27,23 +30,10 @@ export class JwtAuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     req.user = await this.accountService.userFromAccessToken(
-      readCookie(req, ACCESS_COOKIE),
+      readAccessToken(req),
     );
     return true; // userFromAccessToken tự ném 401 nếu không hợp lệ
   }
-}
-
-function readCookie(req: Request, name: string): string | undefined {
-  const raw = req.headers.cookie;
-  if (!raw) return undefined;
-  for (const part of raw.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
-    }
-  }
-  return undefined;
 }
 
 /** Lấy user hiện tại trong controller: `@CurrentUser() user: UserDocument`. */

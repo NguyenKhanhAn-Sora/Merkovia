@@ -55,6 +55,21 @@ export class Profile {
   @Prop({ type: Object })
   avatarCrop?: Record<string, unknown>;
 
+  /**
+   * Số điện thoại LIÊN HỆ, tách hẳn khỏi `User.phone` (thứ dùng để đăng nhập).
+   *
+   * Cố ý KHÔNG unique: hai tài khoản trong một nhà dùng chung số máy bàn là
+   * chuyện bình thường, còn ràng buộc unique ở đây sẽ chặn oan người thứ hai.
+   * Danh tính vẫn do `User.email`/`User.phone` giữ.
+   *
+   * 🔴 Chỉ ghi được sau khi xác thực OTP (`AccountProfileService.changePhone`)
+   * — có mặt ở đây nghĩa là đã xác thực, không cần thêm cờ riêng.
+   *
+   * Lưu dạng E.164 (`+84…`) cho khớp với `User.phone` và `Shop.contactPhone`.
+   */
+  @Prop({ trim: true })
+  phone?: string;
+
   @Prop()
   dateOfBirth?: Date;
 

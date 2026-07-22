@@ -18,6 +18,11 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/jpg': 'jpg',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  // Video trong đánh giá sản phẩm. mp4 (H.264) là định dạng điện thoại nào
+  // cũng quay ra và trình duyệt nào cũng phát được; quicktime là .mov của iPhone.
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
 };
 
 export interface UploadedMedia {
@@ -69,13 +74,27 @@ export class MediaService {
   }
 
   /** Upload ảnh đại diện, trả về URL công khai. */
-  async uploadAvatar(file: {
+  uploadAvatar(file: {
     buffer: Buffer;
     mimetype: string;
   }): Promise<UploadedMedia> {
+    return this.upload(file, 'avatars');
+  }
+
+  /**
+   * Upload một tệp vào thư mục chỉ định.
+   *
+   * Tách thư mục theo mục đích (`avatars/`, `reviews/`) để sau này còn đặt được
+   * vòng đời lưu trữ khác nhau trên R2 — video đánh giá nặng hơn ảnh đại diện
+   * hàng chục lần.
+   */
+  async upload(
+    file: { buffer: Buffer; mimetype: string },
+    folder: string,
+  ): Promise<UploadedMedia> {
     const client = this.ensureReady();
     const ext = EXT_BY_MIME[file.mimetype] ?? 'bin';
-    const key = `avatars/${randomUUID()}.${ext}`;
+    const key = `${folder}/${randomUUID()}.${ext}`;
 
     try {
       await client.send(
@@ -90,7 +109,7 @@ export class MediaService {
     } catch (err) {
       this.logger.error('Upload R2 thất bại', err as Error);
       throw new HttpException(
-        'Tải ảnh lên thất bại. Vui lòng thử lại.',
+        'Tải tệp lên thất bại. Vui lòng thử lại.',
         HttpStatus.BAD_GATEWAY,
       );
     }

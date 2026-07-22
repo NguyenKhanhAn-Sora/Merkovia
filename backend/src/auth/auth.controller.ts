@@ -12,6 +12,13 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { CookieOptions, Request, Response } from 'express';
+import {
+  accessCookieName,
+  readAccessToken,
+  readCookie,
+  refreshCookieName,
+  scopeFromRequest,
+} from '../common/auth-scope';
 import { AuthService, OTP_VERIFY_MESSAGES } from './auth.service';
 import { AccountService } from './account.service';
 import { SendOtpDto } from './dto/send-otp.dto';
@@ -36,8 +43,11 @@ import {
 } from './dto/password.dto';
 import { config } from '../config/config';
 
-const ACCESS_COOKIE = 'access_token';
-const REFRESH_COOKIE = 'refresh_token';
+/**
+ * Tên cookie KHÔNG cố định nữa: mỗi app một bộ riêng để người mua và người bán
+ * đăng nhập hai tài khoản khác nhau cùng lúc mà không đè cookie của nhau.
+ * Xem `common/auth-scope.ts`.
+ */
 
 @Controller('auth')
 export class AuthController {
@@ -45,24 +55,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly accountService: AccountService,
   ) {}
-
-  /** Đọc một cookie httpOnly từ header (không dùng cookie-parser). */
-  private readCookie(req: Request, name: string): string | undefined {
-    const raw = req.headers.cookie;
-    if (!raw) return undefined;
-    for (const part of raw.split(';')) {
-      const eq = part.indexOf('=');
-      if (eq === -1) continue;
-      if (part.slice(0, eq).trim() === name) {
-        return decodeURIComponent(part.slice(eq + 1).trim());
-      }
-    }
-    return undefined;
-  }
-
-  private readAccessToken(req: Request): string | undefined {
-    return this.readCookie(req, ACCESS_COOKIE);
-  }
 
   private cookieBase(): CookieOptions {
     return {
@@ -74,21 +66,30 @@ export class AuthController {
   }
 
   private setAuthCookies(
+    req: Request,
     res: Response,
     access: string,
     refresh: string,
     remember: boolean,
   ) {
+    const scope = scopeFromRequest(req);
     const base = this.cookieBase();
     // remember=true → cookie bền (maxAge); false → session cookie (mất khi đóng trình duyệt).
-    res.cookie(ACCESS_COOKIE, access, {
+    res.cookie(accessCookieName(scope), access, {
       ...base,
       ...(remember ? { maxAge: config.jwt.accessExpires * 1000 } : {}),
     });
-    res.cookie(REFRESH_COOKIE, refresh, {
+    res.cookie(refreshCookieName(scope), refresh, {
       ...base,
       ...(remember ? { maxAge: config.jwt.refreshExpires * 1000 } : {}),
     });
+  }
+
+  /** Chỉ xoá cookie của app gọi tới — đăng xuất bên này không đá bên kia ra. */
+  private clearAuthCookies(req: Request, res: Response) {
+    const scope = scopeFromRequest(req);
+    res.clearCookie(accessCookieName(scope), this.cookieBase());
+    res.clearCookie(refreshCookieName(scope), this.cookieBase());
   }
 
   /** Kiểm tra trùng username / email / SĐT (dùng cho debounce ở form đăng ký). */
@@ -156,18 +157,19 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async registerSeller(
     @Body() dto: RegisterSellerDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken, user } =
       await this.accountService.registerSeller(dto);
-    this.setAuthCookies(res, accessToken, refreshToken, true);
+    this.setAuthCookies(req, res, accessToken, refreshToken, true);
     return { user };
   }
 
   /** Gian hàng của tài khoản đang đăng nhập (null nếu chưa mở shop). */
   @Get('my-shop')
   myShop(@Req() req: Request) {
-    return this.accountService.getMyShop(this.readAccessToken(req));
+    return this.accountService.getMyShop(readAccessToken(req));
   }
 
   /** Cập nhật thông tin gian hàng (chỉ gửi các trường cần đổi). */
@@ -175,7 +177,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   updateShop(@Body() dto: UpdateShopDto, @Req() req: Request) {
-    return this.accountService.updateShop(this.readAccessToken(req), dto);
+    return this.accountService.updateShop(readAccessToken(req), dto);
   }
 
   /** Đổi logo gian hàng. */
@@ -183,7 +185,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   updateShopLogo(@Body() dto: UpdateShopLogoDto, @Req() req: Request) {
-    return this.accountService.updateShopLogo(this.readAccessToken(req), dto);
+    return this.accountService.updateShopLogo(readAccessToken(req), dto);
   }
 
   /**
@@ -198,11 +200,11 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const token = this.readAccessToken(req);
+    const token = readAccessToken(req);
     const { accessToken, refreshToken, user } =
       await this.accountService.openShop(token, dto);
     // Giữ đăng nhập với phiên mới (đã có role seller). Cookie bền như phiên trước.
-    this.setAuthCookies(res, accessToken, refreshToken, true);
+    this.setAuthCookies(req, res, accessToken, refreshToken, true);
     return { user };
   }
 
@@ -211,12 +213,13 @@ export class AuthController {
   @Throttle({ default: { limit: 8, ttl: 60_000 } })
   async login(
     @Body() dto: LoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken, user } =
       await this.accountService.login(dto);
     // Token đặt trong cookie httpOnly — KHÔNG trả về body (chống XSS đánh cắp).
-    this.setAuthCookies(res, accessToken, refreshToken, dto.remember ?? false);
+    this.setAuthCookies(req, res, accessToken, refreshToken, dto.remember ?? false);
     return { user };
   }
 
@@ -230,6 +233,7 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async google(
     @Body() dto: GoogleAuthDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.accountService.googleAuth(dto);
@@ -241,6 +245,7 @@ export class AuthController {
       };
     }
     this.setAuthCookies(
+      req,
       res,
       result.accessToken,
       result.refreshToken,
@@ -254,11 +259,12 @@ export class AuthController {
   @Throttle({ default: { limit: 8, ttl: 60_000 } })
   async loginPhone(
     @Body() dto: LoginPhoneDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken, user } =
       await this.accountService.loginWithPhone(dto);
-    this.setAuthCookies(res, accessToken, refreshToken, dto.remember ?? false);
+    this.setAuthCookies(req, res, accessToken, refreshToken, dto.remember ?? false);
     return { user };
   }
 
@@ -286,12 +292,12 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async resetPassword(
     @Body() dto: ResetPasswordDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.accountService.resetPassword(dto);
     // Xoá luôn cookie trên thiết bị hiện tại → bắt đăng nhập lại bằng mật khẩu mới.
-    res.clearCookie(ACCESS_COOKIE, this.cookieBase());
-    res.clearCookie(REFRESH_COOKIE, this.cookieBase());
+    this.clearAuthCookies(req, res);
     return result;
   }
 
@@ -308,17 +314,16 @@ export class AuthController {
   ) {
     const { accessToken, refreshToken, user } =
       await this.accountService.refreshSession(
-        this.readCookie(req, REFRESH_COOKIE),
+        readCookie(req, refreshCookieName(scopeFromRequest(req))),
       );
-    this.setAuthCookies(res, accessToken, refreshToken, true);
+    this.setAuthCookies(req, res, accessToken, refreshToken, true);
     return { user };
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie(ACCESS_COOKIE, this.cookieBase());
-    res.clearCookie(REFRESH_COOKIE, this.cookieBase());
+  logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    this.clearAuthCookies(req, res);
     return { ok: true };
   }
 }

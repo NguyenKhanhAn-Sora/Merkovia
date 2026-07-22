@@ -1,0 +1,399 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Review, ReviewDocument } from './schemas/review.schema';
+import {
+  CreateReviewDto,
+  ListReviewsDto,
+  ListShopReviewsDto,
+  ReplyReviewDto,
+} from './dto/review.dto';
+import { Order, OrderDocument } from '../orders/schemas/order.schema';
+import { Product, ProductDocument } from '../products/schemas/product.schema';
+import { Profile, ProfileDocument } from '../profiles/schemas/profile.schema';
+import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
+import type { UserDocument } from '../users/schemas/user.schema';
+
+const PAGE_SIZE = 10;
+
+/**
+ * Che bớt tên người đánh giá ẩn danh: "Nguyễn Khánh Ân" → "Ngu*** Ân".
+ * Giữ lại chữ đầu và chữ cuối để người đọc vẫn thấy đây là người thật, chứ
+ * không phải một dòng vô danh máy sinh ra.
+ */
+function maskName(name?: string): string {
+  const clean = (name ?? '').trim();
+  if (!clean) return 'Người mua ẩn danh';
+
+  const parts = clean.split(/\s+/);
+  const head = parts[0];
+  const masked = head.length <= 2 ? `${head}***` : `${head.slice(0, 3)}***`;
+  return parts.length > 1 ? `${masked} ${parts[parts.length - 1]}` : masked;
+}
+
+@Injectable()
+export class ReviewsService {
+  private readonly logger = new Logger(ReviewsService.name);
+
+  constructor(
+    @InjectModel(Review.name)
+    private readonly reviewModel: Model<ReviewDocument>,
+    @InjectModel(Order.name)
+    private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(Product.name)
+    private readonly productModel: Model<ProductDocument>,
+    @InjectModel(Profile.name)
+    private readonly profileModel: Model<ProfileDocument>,
+    @InjectModel(Shop.name)
+    private readonly shopModel: Model<ShopDocument>,
+  ) {}
+
+  /* ------------------------------ Người mua ------------------------------ */
+
+  /**
+   * Viết đánh giá cho một dòng hàng trong đơn đã giao.
+   *
+   * 🔴 Ba lớp chặn, và cả ba đều cần:
+   *  1. Đơn phải của CHÍNH người đang đăng nhập.
+   *  2. Đơn phải ở trạng thái `delivered` — chưa nhận hàng thì chưa có gì để nói.
+   *  3. Khoá duy nhất `{order, variant}` chặn hai lần bấm gửi song song. Kiểm
+   *     trước rồi ghi sau luôn có khe hở giữa hai bước, và hậu quả không chỉ là
+   *     hai đánh giá trùng mà là `ratingCount` bị cộng hai lần.
+   */
+  async create(user: UserDocument, dto: CreateReviewDto) {
+    const order = await this.orderModel.findOne({
+      _id: dto.orderId,
+      buyer: user._id,
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng.');
+
+    if (order.status !== 'delivered') {
+      throw new BadRequestException(
+        'Chỉ đánh giá được sau khi đơn hàng giao thành công.',
+      );
+    }
+
+    const item = order.items.find(
+      (i) => String(i.variant) === dto.variantId,
+    );
+    if (!item) {
+      throw new NotFoundException('Sản phẩm này không có trong đơn hàng.');
+    }
+
+    const media = (dto.media ?? []).map((m) => ({
+      kind: m.kind as 'image' | 'video',
+      url: m.url.trim(),
+      key: m.key?.trim(),
+    }));
+
+    let review: ReviewDocument;
+    try {
+      review = await this.reviewModel.create({
+        buyer: user._id,
+        product: item.product,
+        shop: order.shop,
+        order: order._id,
+        variant: item.variant,
+        variantLabel: item.variantLabel,
+        rating: dto.rating,
+        comment: dto.comment?.trim() ?? '',
+        media,
+        anonymous: !!dto.anonymous,
+      });
+    } catch (e: unknown) {
+      if ((e as { code?: number })?.code === 11000) {
+        throw new ConflictException('Bạn đã đánh giá sản phẩm này rồi.');
+      }
+      throw e;
+    }
+
+    // Điểm sao chỉ là con số hiển thị — hỏng ở đây không được làm mất đánh giá
+    // vừa viết. Bản thân phép cộng lại tự chữa được ở lần đánh giá sau.
+    await this.applyRatingDelta(item.product, deltaFor(dto.rating, +1));
+
+    return { review: await this.publicReview(review) };
+  }
+
+  /** Đánh giá của chính mình cho một đơn — để giao diện biết dòng nào đã viết. */
+  async myReviewsForOrder(user: UserDocument, orderId: string) {
+    if (!Types.ObjectId.isValid(orderId)) return { reviews: [] };
+    const reviews = await this.reviewModel
+      .find({ order: orderId, buyer: user._id })
+      .lean();
+    return {
+      reviews: reviews.map((r) => ({
+        variantId: String(r.variant),
+        rating: r.rating,
+        comment: r.comment,
+      })),
+    };
+  }
+
+  /* ----------------------------- Công khai ------------------------------ */
+
+  /** Danh sách đánh giá của một sản phẩm. */
+  async listForProduct(productId: string, query: ListReviewsDto) {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new NotFoundException('Không tìm thấy sản phẩm.');
+    }
+
+    const filter: Record<string, unknown> = { product: productId };
+    if (query.rating) filter.rating = query.rating;
+    // `$ne: []` chứ không phải `$exists`: mảng rỗng vẫn tồn tại.
+    if (query.hasMedia === 'true') filter.media = { $ne: [] };
+
+    const page = Math.max(1, query.page ?? 1);
+    const [items, total] = await Promise.all([
+      this.reviewModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * PAGE_SIZE)
+        .limit(PAGE_SIZE),
+      this.reviewModel.countDocuments(filter),
+    ]);
+
+    return {
+      items: await this.publicReviews(items),
+      total,
+      page,
+      limit: PAGE_SIZE,
+    };
+  }
+
+  /* ----------------------------- Người bán ------------------------------ */
+
+  async listForShop(user: UserDocument, query: ListShopReviewsDto) {
+    const shop = await this.shopModel.findOne({ owner: user._id });
+    if (!shop) throw new ForbiddenException('Tài khoản chưa có gian hàng.');
+
+    const base: Record<string, unknown> = { shop: shop._id };
+    const filter = { ...base };
+    if (query.tab === 'unanswered') filter.reply = { $in: [null, ''] };
+    if (query.tab === 'low') filter.rating = { $lte: 3 };
+    if (query.rating) filter.rating = query.rating;
+
+    const page = Math.max(1, query.page ?? 1);
+    const [items, total, all, unanswered, low, grouped] = await Promise.all([
+      this.reviewModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * PAGE_SIZE)
+        .limit(PAGE_SIZE),
+      this.reviewModel.countDocuments(filter),
+      this.reviewModel.countDocuments(base),
+      this.reviewModel.countDocuments({ ...base, reply: { $in: [null, ''] } }),
+      this.reviewModel.countDocuments({ ...base, rating: { $lte: 3 } }),
+      this.reviewModel.aggregate<{ _id: number; count: number }>([
+        { $match: { shop: shop._id } },
+        { $group: { _id: '$rating', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    // Phân bố sao của CẢ gian hàng: gộp từ đánh giá thật, không đọc từ
+    // `Product.stats` (mỗi shop có nhiều sản phẩm, cộng trung bình của trung
+    // bình sẽ ra số sai).
+    const breakdown = [0, 0, 0, 0, 0];
+    let sum = 0;
+    for (const g of grouped) {
+      if (g._id >= 1 && g._id <= 5) breakdown[g._id - 1] = g.count;
+      sum += g._id * g.count;
+    }
+
+    return {
+      items: await this.publicReviews(items, { forShop: true }),
+      total,
+      page,
+      limit: PAGE_SIZE,
+      counts: { all, unanswered, low },
+      summary: {
+        ratingAvg: all > 0 ? Math.round((sum / all) * 10) / 10 : 0,
+        ratingCount: all,
+        breakdown,
+      },
+    };
+  }
+
+  /** Người bán phản hồi một đánh giá. */
+  async reply(user: UserDocument, reviewId: string, dto: ReplyReviewDto) {
+    const shop = await this.shopModel.findOne({ owner: user._id });
+    if (!shop) throw new ForbiddenException('Tài khoản chưa có gian hàng.');
+
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new NotFoundException('Không tìm thấy đánh giá.');
+    }
+    const review = await this.reviewModel.findOne({
+      _id: reviewId,
+      shop: shop._id,
+    });
+    if (!review) throw new NotFoundException('Không tìm thấy đánh giá.');
+
+    review.reply = dto.reply.trim();
+    review.repliedAt = new Date();
+    await review.save();
+
+    return { review: await this.publicReview(review, { forShop: true }) };
+  }
+
+  /* ------------------------------ Nội bộ -------------------------------- */
+
+  /**
+   * Cộng/trừ phân bố sao rồi TÍNH LẠI số lượng và điểm trung bình từ chính nó.
+   *
+   * 🔴 Làm trong MỘT update dạng pipeline thay vì đọc-tính-ghi: hai người cùng
+   * đánh giá một sản phẩm thì cách đọc-rồi-ghi sẽ có người ghi đè kết quả của
+   * người kia, và điểm trung bình trôi dần khỏi sự thật mà không ai hay.
+   *
+   * Phân bố sao là nguồn sự thật DUY NHẤT; `ratingCount` và `ratingAvg` luôn
+   * được suy ra từ nó nên không bao giờ lệch nhau, kể cả khi sửa hay xoá.
+   */
+  private async applyRatingDelta(productId: Types.ObjectId, delta: number[]) {
+    try {
+      await this.productModel.updateOne({ _id: productId }, [
+        {
+          $set: {
+            'stats.ratingBreakdown': {
+              $map: {
+                input: { $range: [0, 5] },
+                as: 'i',
+                in: {
+                  // Không bao giờ xuống dưới 0: dữ liệu cũ có thể thiếu ô,
+                  // và một lần trừ hụt sẽ làm hỏng vĩnh viễn con số.
+                  $max: [
+                    0,
+                    {
+                      $add: [
+                        {
+                          $ifNull: [
+                            {
+                              $arrayElemAt: [
+                                { $ifNull: ['$stats.ratingBreakdown', []] },
+                                '$$i',
+                              ],
+                            },
+                            0,
+                          ],
+                        },
+                        { $arrayElemAt: [delta, '$$i'] },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        {
+          $set: {
+            'stats.ratingCount': { $sum: '$stats.ratingBreakdown' },
+            'stats.ratingAvg': {
+              $let: {
+                vars: {
+                  count: { $sum: '$stats.ratingBreakdown' },
+                  weighted: {
+                    $sum: {
+                      $map: {
+                        input: { $range: [0, 5] },
+                        as: 'i',
+                        in: {
+                          $multiply: [
+                            {
+                              $arrayElemAt: [
+                                '$stats.ratingBreakdown',
+                                '$$i',
+                              ],
+                            },
+                            { $add: ['$$i', 1] },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+                in: {
+                  $cond: [
+                    { $gt: ['$$count', 0] },
+                    {
+                      $round: [{ $divide: ['$$weighted', '$$count'] }, 1],
+                    },
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ]);
+    } catch (err: unknown) {
+      this.logger.warn(`Không cập nhật được điểm sao: ${String(err)}`);
+    }
+  }
+
+  /** Gắn thông tin người viết cho một loạt đánh giá — hỏi hồ sơ MỘT lượt. */
+  private async publicReviews(
+    reviews: ReviewDocument[],
+    opts: { forShop?: boolean } = {},
+  ) {
+    if (reviews.length === 0) return [];
+
+    // Người ẩn danh vẫn phải lấy hồ sơ để che tên cho ra hồn, nhưng KHÔNG trả
+    // ảnh đại diện — ảnh đại diện là thứ nhận ra người ta ngay lập tức.
+    const buyerIds = [...new Set(reviews.map((r) => String(r.buyer)))].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const profiles = await this.profileModel
+      .find({ user: { $in: buyerIds } })
+      .select('user fullName displayName avatarUrl')
+      .lean();
+    const byUser = new Map(profiles.map((p) => [String(p.user), p]));
+
+    return reviews.map((r) => this.shape(r, byUser.get(String(r.buyer)), opts));
+  }
+
+  private async publicReview(
+    review: ReviewDocument,
+    opts: { forShop?: boolean } = {},
+  ) {
+    const [shaped] = await this.publicReviews([review], opts);
+    return shaped;
+  }
+
+  private shape(
+    r: ReviewDocument,
+    profile?: { fullName?: string; displayName?: string; avatarUrl?: string },
+    opts: { forShop?: boolean } = {},
+  ) {
+    const realName = profile?.fullName || profile?.displayName || '';
+    return {
+      id: String(r._id),
+      rating: r.rating,
+      comment: r.comment,
+      media: r.media.map((m) => ({ kind: m.kind, url: m.url })),
+      variantLabel: r.variantLabel,
+      anonymous: r.anonymous,
+      author: {
+        name: r.anonymous ? maskName(realName) : realName || 'Người mua',
+        avatarUrl: r.anonymous ? undefined : profile?.avatarUrl,
+      },
+      reply: r.reply,
+      repliedAt: r.repliedAt,
+      edited: r.edited,
+      createdAt: (r as unknown as { createdAt: Date }).createdAt,
+      // Người bán cần biết đánh giá thuộc sản phẩm nào để mở đúng trang.
+      ...(opts.forShop ? { productId: String(r.product) } : {}),
+    };
+  }
+}
+
+/** Mảng 5 phần tử để cộng/trừ đúng một ô phân bố sao. */
+function deltaFor(rating: number, sign: 1 | -1): number[] {
+  const delta = [0, 0, 0, 0, 0];
+  delta[rating - 1] = sign;
+  return delta;
+}

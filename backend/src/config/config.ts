@@ -135,6 +135,13 @@ export const config = {
   frontendUrl: optional('FRONTEND_URL', 'http://localhost:3000'),
 
   /**
+   * URL app Kênh Người Bán. Dùng để nhận ra request đến từ app nào mà cấp đúng
+   * bộ cookie — hai app dùng chung host thì dùng chung hũ cookie, không tách
+   * theo cổng được. Xem `common/auth-scope.ts`.
+   */
+  sellerUrl: optional('SELLER_URL', 'http://localhost:3001'),
+
+  /**
    * Bí mật ký/xác thực webhook thanh toán.
    * Với cổng thật đây là secret do nhà cung cấp cấp. Có giá trị mặc định để
    * môi trường dev vẫn boot được, nhưng KHÔNG được dùng mặc định khi chạy thật.

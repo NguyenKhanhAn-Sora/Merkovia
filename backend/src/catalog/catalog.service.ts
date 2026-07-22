@@ -219,6 +219,9 @@ export class CatalogService {
           views: product.stats?.views ?? 0,
           ratingAvg: product.stats?.ratingAvg ?? 0,
           ratingCount: product.stats?.ratingCount ?? 0,
+          // Phân bố sao để vẽ thanh tổng quan — đọc sẵn từ đây, khỏi phải
+          // aggregate lại toàn bộ đánh giá mỗi lần mở trang sản phẩm.
+          ratingBreakdown: product.stats?.ratingBreakdown ?? [0, 0, 0, 0, 0],
         },
         category: product.category,
         categoryPath: product.categoryPath,

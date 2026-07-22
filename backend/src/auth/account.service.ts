@@ -344,6 +344,10 @@ export class AccountService {
             [
               {
                 user: user._id,
+                // 🔴 Người nhận mặc định chính là chủ tài khoản. Bỏ trống thì
+                // sổ địa chỉ hiện mỗi con đường, và đơn hàng đi ra không có
+                // tên người nhận để hãng vận chuyển gọi.
+                recipientName: dto.fullName.trim(),
                 recipientPhone: phone,
                 street: dto.street?.trim(),
                 ward: dto.ward?.trim(),

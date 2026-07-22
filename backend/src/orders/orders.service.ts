@@ -252,6 +252,8 @@ export class OrdersService {
       throw e;
     }
 
+    await this.rememberFirstAddress(user, dto.shippingAddress);
+
     // Đơn online cần một phiên thanh toán cho CẢ nhóm — người mua trả một lần
     // cho toàn giỏ, không phải trả riêng từng gian hàng.
     let payment: ReturnType<PaymentService['publicPayment']> | null = null;
@@ -271,6 +273,53 @@ export class OrdersService {
       orders: created.map((o) => this.toBuyerOrder(o)),
       payment,
     };
+  }
+
+  /**
+   * Sổ địa chỉ còn trống thì cất địa chỉ của đơn đầu tiên làm mặc định.
+   *
+   * Người vừa đăng ký xong đã mua ngay thì chưa từng vào trang Tài khoản; gõ
+   * lại nguyên địa chỉ ở đơn thứ hai là phiền vô cớ. Cố ý CHỈ lưu địa chỉ, KHÔNG
+   * đụng tới số điện thoại của tài khoản — số người nhận rất có thể là của
+   * người khác (mua quà gửi mẹ), tự gán vào hồ sơ là gán nhầm danh tính.
+   *
+   * 🔴 Không bao giờ để hỏng đơn: đơn đã ghi và kho đã trừ xong rồi, tiện ích
+   * này mà ném lỗi thì người mua thấy "đặt hàng thất bại" cho một đơn thật ra
+   * đã thành công.
+   */
+  private async rememberFirstAddress(
+    user: UserDocument,
+    address: CreateOrderDto['shippingAddress'],
+  ) {
+    try {
+      const count = await this.addressModel.countDocuments({ user: user._id });
+      if (count > 0) return;
+
+      const created = await this.addressModel.create({
+        user: user._id,
+        label: address.label?.trim(),
+        recipientName: address.recipientName,
+        recipientPhone: address.recipientPhone,
+        street: address.street,
+        ward: address.ward,
+        wardCode: address.wardCode,
+        district: address.district,
+        province: address.province,
+        provinceCode: address.provinceCode,
+        lat: address.lat,
+        lng: address.lng,
+        isDefault: true,
+      });
+
+      // Hai đơn đặt cùng lúc từ sổ trống thì cả hai đều thấy count 0. Dọn lại
+      // để chắc chắn chỉ còn ĐÚNG MỘT mặc định, thay vì tin vào phép đếm.
+      await this.addressModel.updateMany(
+        { user: user._id, isDefault: true, _id: { $ne: created._id } },
+        { $set: { isDefault: false } },
+      );
+    } catch (err: unknown) {
+      this.logger.warn(`Không lưu được địa chỉ đầu tiên: ${String(err)}`);
+    }
   }
 
   /** Xoá đơn lỡ tạo và trả kho — dùng khi ghi đơn thất bại giữa chừng. */
@@ -702,6 +751,83 @@ export class OrdersService {
       page,
       limit,
       counts,
+    };
+  }
+
+  /**
+   * Số liệu cho trang Tổng quan của người bán.
+   *
+   * Trước đây trang này hiển thị `0` cứng trong code — người bán đã có đơn thật
+   * mà nhìn vào vẫn tưởng chưa bán được gì.
+   *
+   * Doanh thu chỉ tính đơn **đã giao thành công**: đơn đang chạy có thể bị huỷ,
+   * đếm sớm là báo cho người bán một con số sẽ tụt xuống sau đó.
+   */
+  async shopStats(user: UserDocument) {
+    const shop = await this.requireShop(user);
+    const since = new Date(Date.now() - 30 * 86_400_000);
+
+    const [counts, revenue, recent, topProducts] = await Promise.all([
+      this.countByStatus({ shop: shop._id }),
+      this.orderModel.aggregate<{ _id: null; total: number; orders: number }>([
+        { $match: { shop: shop._id, status: 'delivered' } },
+        { $group: { _id: null, total: { $sum: '$itemsTotal' }, orders: { $sum: 1 } } },
+      ]),
+      this.orderModel
+        .find({ shop: shop._id })
+        .sort({ createdAt: -1 })
+        .limit(5),
+      // Bán chạy trong 30 ngày — mở từng dòng hàng ra rồi gom theo sản phẩm.
+      this.orderModel.aggregate<{
+        _id: Types.ObjectId;
+        name: string;
+        image?: string;
+        quantity: number;
+        revenue: number;
+      }>([
+        {
+          $match: {
+            shop: shop._id,
+            status: 'delivered',
+            deliveredAt: { $gte: since },
+          },
+        },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: '$items.product',
+            name: { $first: '$items.name' },
+            image: { $first: '$items.image' },
+            quantity: { $sum: '$items.quantity' },
+            revenue: { $sum: '$items.subtotal' },
+          },
+        },
+        { $sort: { quantity: -1 } },
+        { $limit: 5 },
+      ]),
+    ]);
+
+    return {
+      counts,
+      revenue: {
+        /** Tổng tiền hàng từ các đơn đã giao (chưa trừ hoa hồng). */
+        total: revenue[0]?.total ?? 0,
+        deliveredOrders: revenue[0]?.orders ?? 0,
+      },
+      /** Việc cần làm ngay — con số người bán quan tâm nhất khi mở dashboard. */
+      todo: {
+        pending: counts.pending ?? 0,
+        confirmed: counts.confirmed ?? 0,
+        shipping: counts.shipping ?? 0,
+      },
+      recentOrders: recent.map((o) => this.toSellerOrder(o)),
+      topProducts: topProducts.map((p) => ({
+        productId: String(p._id),
+        name: p.name,
+        image: p.image,
+        quantity: p.quantity,
+        revenue: p.revenue,
+      })),
     };
   }
 

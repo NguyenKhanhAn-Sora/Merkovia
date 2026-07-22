@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { createHash } from 'node:crypto';
 import type { Request } from 'express';
+import { readAccessToken } from './auth-scope';
 
 /**
  * Giới hạn tần suất theo PHIÊN ĐĂNG NHẬP thay vì theo IP.
@@ -21,25 +22,14 @@ import type { Request } from 'express';
 export class UserThrottlerGuard extends ThrottlerGuard {
   protected getTracker(req: Request): Promise<string> {
     // Đọc cookie thủ công: dự án không dùng cookie-parser, và guard này chạy
-    // TRƯỚC JwtAuthGuard nên cũng chưa có `req.user` để dựa vào.
-    const token = readCookie(req, 'access_token');
+    // TRƯỚC JwtAuthGuard nên cũng chưa có `req.user` để dựa vào. Lấy token của
+    // đúng app gửi request, nếu không thì hai phiên song song đếm chung một
+    // hạn mức và người bán bấm nhiều sẽ khoá luôn người mua.
+    const token = readAccessToken(req);
     if (token) {
       const hash = createHash('sha256').update(token).digest('hex').slice(0, 32);
       return Promise.resolve(`user:${hash}`);
     }
     return Promise.resolve(`ip:${req.ip ?? 'unknown'}`);
   }
-}
-
-function readCookie(req: Request, name: string): string | undefined {
-  const raw = req.headers.cookie;
-  if (!raw) return undefined;
-  for (const part of raw.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
-    }
-  }
-  return undefined;
 }

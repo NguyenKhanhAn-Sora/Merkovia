@@ -50,6 +50,18 @@ interface GoongGeocodeRes {
   }[];
 }
 
+/** Toạ độ → chỉ số ô bản đồ (phép chiếu Web Mercator, chuẩn chung mọi nhà cung cấp). */
+function tileAt(lat: number, lng: number, zoom: number) {
+  const n = 2 ** zoom;
+  const rad = (lat * Math.PI) / 180;
+  return {
+    x: Math.floor(((lng + 180) / 360) * n),
+    y: Math.floor(
+      ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * n,
+    ),
+  };
+}
+
 /**
  * Gợi ý địa chỉ chi tiết và lấy toạ độ, qua Goong Maps.
  *
@@ -69,20 +81,93 @@ export class PlacesService {
     return !!config.goong.apiKey;
   }
 
-  get info() {
+  /**
+   * Bản đồ tương tác cần khoá RIÊNG (maptiles) do trình duyệt gọi thẳng, khác
+   * khoá REST chỉ dùng ở server.
+   *
+   * Có khoá KHÔNG có nghĩa là dùng được: khoá dùng thử của Goong vẫn tải được
+   * tệp style nhưng mọi ô bản đồ chi tiết đều trả 404, mà maplibre coi 404 là
+   * "ô trống" nên không báo lỗi gì — kết quả là một khung đen im lặng. Vì vậy
+   * phải thử tải thật một ô bản đồ rồi mới dám bật.
+   */
+  async info() {
+    const mapUsable = await this.probeMapTiles();
     return {
       enabled: this.enabled,
       provider: this.enabled ? 'Goong' : null,
-      /**
-       * Bản đồ tương tác cần khoá RIÊNG (maptiles) do trình duyệt gọi thẳng,
-       * khác khoá REST chỉ dùng ở server. Thiếu khoá này thì nút "Chọn trên
-       * bản đồ" tự ẩn — gợi ý gõ chữ vẫn dùng bình thường.
-       */
-      mapEnabled: !!config.goong.mapTilesKey,
-      mapStyleUrl: config.goong.mapTilesKey
+      mapEnabled: mapUsable,
+      mapStyleUrl: mapUsable
         ? `${config.goong.mapStyleUrl}?api_key=${config.goong.mapTilesKey}`
         : null,
     };
+  }
+
+  /** Kết quả thử tải ô bản đồ — hỏi nhà cung cấp một lần rồi dùng lại. */
+  private mapProbe?: Promise<boolean>;
+
+  private async probeMapTiles(): Promise<boolean> {
+    if (!config.goong.mapTilesKey) return false;
+    this.mapProbe ??= this.runMapProbe().catch(() => false);
+    return this.mapProbe;
+  }
+
+  /**
+   * Đi trọn đường mà trình duyệt sẽ đi: style → nguồn tile → một ô cụ thể.
+   * Kiểm từng khâu như vậy mới bắt được trường hợp style tải ngon lành mà tile
+   * thì không, và không phải chép cứng đường dẫn tile của nhà cung cấp.
+   */
+  private async runMapProbe(): Promise<boolean> {
+    const key = config.goong.mapTilesKey;
+    const get = async (url: string) => {
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) throw new Error(`${url} trả ${res.status}`);
+      return res;
+    };
+
+    try {
+      const style = (await (
+        await get(`${config.goong.mapStyleUrl}?api_key=${key}`)
+      ).json()) as {
+        sources?: Record<string, { url?: string; tiles?: string[] }>;
+      };
+
+      // Nguồn nhiều lớp nhất là nguồn vẽ đường sá, nhà cửa, tên địa danh —
+      // đúng thứ vắng mặt khi khoá không đủ quyền.
+      const source =
+        style.sources?.composite ?? Object.values(style.sources ?? {})[0];
+      if (!source) throw new Error('style không có nguồn tile');
+
+      let template = source.tiles?.[0];
+      let maxzoom = 14;
+      if (!template && source.url) {
+        const meta = (await (await get(source.url)).json()) as {
+          tiles?: string[];
+          maxzoom?: number;
+        };
+        template = meta.tiles?.[0];
+        // Xin ô sâu hơn mức nhà cung cấp có là tự chuốc 404 rồi kết luận sai.
+        if (typeof meta.maxzoom === 'number') {
+          maxzoom = Math.min(maxzoom, meta.maxzoom);
+        }
+      }
+      if (!template) throw new Error('nguồn tile không có mẫu đường dẫn');
+
+      // Một ô ngay giữa TP.HCM: chỗ nào có dữ liệu thì chỗ này phải có.
+      const { x, y } = tileAt(10.7626, 106.6602, maxzoom);
+      await get(
+        template
+          .replace('{z}', String(maxzoom))
+          .replace('{x}', String(x))
+          .replace('{y}', String(y)),
+      );
+      return true;
+    } catch (e: unknown) {
+      this.logger.warn(
+        `Khoá maptiles không tải được ô bản đồ (${String(e)}). ` +
+          'Bản đồ sẽ dùng nền dự phòng OpenStreetMap.',
+      );
+      return false;
+    }
   }
 
   private async call<T>(path: string, params: Record<string, string>): Promise<T> {
