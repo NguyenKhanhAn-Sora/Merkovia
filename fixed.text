@@ -12,3 +12,5 @@ hàng trong vòng 7 ngày
 panel bên dưới
 - thử test đánh giá 1 sản phẩm và qua bên seller xem có hiển thị trong trang 
 đánh giá không
+- trang sản phẩm của seller bị vỡ UI, hình ảnh của trang đơn hàng trong 
+seller cũng không hiển thị được hình ảnh sản phẩm
