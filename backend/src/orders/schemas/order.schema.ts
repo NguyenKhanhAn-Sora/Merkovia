@@ -25,20 +25,24 @@ export const ORDER_STATUS = [
 export type OrderStatus = (typeof ORDER_STATUS)[number];
 
 /** Trạng thái đã kết thúc — không chuyển đi đâu được nữa. */
-export const TERMINAL_STATUS: readonly OrderStatus[] = ['delivered', 'cancelled'];
+export const TERMINAL_STATUS: readonly OrderStatus[] = [
+  'delivered',
+  'cancelled',
+];
 
 /**
  * Chuyển trạng thái hợp lệ. Máy trạng thái nằm ở MỘT chỗ duy nhất để không có
  * đường tắt nào lách được (vd nhảy thẳng pending → delivered, hay lùi ngược).
  */
-export const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
-  pending_payment: ['pending', 'cancelled'],
-  pending: ['confirmed', 'cancelled'],
-  confirmed: ['shipping', 'cancelled'],
-  shipping: ['delivered'],
-  delivered: [],
-  cancelled: [],
-};
+export const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> =
+  {
+    pending_payment: ['pending', 'cancelled'],
+    pending: ['confirmed', 'cancelled'],
+    confirmed: ['shipping', 'cancelled'],
+    shipping: ['delivered'],
+    delivered: [],
+    cancelled: [],
+  };
 
 export const PAYMENT_METHODS = ['cod', 'online'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
@@ -145,6 +149,46 @@ export class ShippingAddress {
 }
 const ShippingAddressSchema = SchemaFactory.createForClass(ShippingAddress);
 
+export const CANCEL_REQUEST_STATUS = [
+  'pending',
+  'approved',
+  'rejected',
+] as const;
+export type CancelRequestStatus = (typeof CANCEL_REQUEST_STATUS)[number];
+
+/**
+ * Yêu cầu huỷ đơn của người mua SAU khi người bán đã xác nhận.
+ *
+ * Trước lúc đó người mua tự huỷ thẳng. Sau lúc đó thì hàng có thể đã đóng gói
+ * nên phải hỏi ý người bán — nhưng cũng không thể chặn cứng: người mua chuyển
+ * nhà sang tỉnh khác mà không có đường ra thì chỉ còn cách từ chối nhận hàng,
+ * tệ hơn cho cả hai.
+ */
+@Schema({ _id: false })
+export class CancelRequest {
+  @Prop({ trim: true, maxlength: 300 })
+  reason?: string;
+
+  @Prop({ required: true })
+  requestedAt: Date;
+
+  @Prop({
+    type: String,
+    enum: CANCEL_REQUEST_STATUS,
+    default: 'pending',
+    required: true,
+  })
+  status: CancelRequestStatus;
+
+  @Prop()
+  respondedAt?: Date;
+
+  /** Lý do người bán từ chối — người mua cần biết vì sao. */
+  @Prop({ trim: true, maxlength: 300 })
+  sellerNote?: string;
+}
+const CancelRequestSchema = SchemaFactory.createForClass(CancelRequest);
+
 /** Một mốc trong lịch sử đơn — dựng nên dòng thời gian hiển thị hai phía. */
 @Schema({ _id: false })
 export class OrderEvent {
@@ -235,6 +279,27 @@ export class Order {
    */
   @Prop({ default: false })
   stockReleased: boolean;
+
+  /**
+   * Khối lượng tính cước đã chốt lúc đặt (gram).
+   *
+   * Lưu lại để tính LẠI cước khi người mua đổi địa chỉ — nếu không thì phải
+   * đọc lại từng sản phẩm, mà người bán có thể đã sửa khối lượng từ lúc đó,
+   * dẫn tới cước mới lệch khỏi cước đáng ra phải tính.
+   */
+  @Prop({ default: 0 })
+  weightGram: number;
+
+  /**
+   * Lần cuối người mua sửa địa chỉ giao hàng.
+   * Người bán cần thấy mốc này: sửa sau khi họ đã in nhãn nghĩa là phải in lại.
+   */
+  @Prop()
+  addressUpdatedAt?: Date;
+
+  /** Yêu cầu huỷ đơn đang chờ người bán duyệt (chỉ có sau khi đã xác nhận). */
+  @Prop({ type: CancelRequestSchema })
+  cancelRequest?: CancelRequest;
 
   /* ---------------------------- Thanh toán ------------------------------ */
   @Prop({ type: String, enum: PAYMENT_METHODS, required: true })

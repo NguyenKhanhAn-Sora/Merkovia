@@ -119,6 +119,15 @@ export class ShippingAddressDto extends ShippingGeoDto {
   district?: string;
 }
 
+/**
+ * Sửa địa chỉ của một đơn đã đặt.
+ *
+ * Cùng ràng buộc với lúc đặt hàng — lệch nhau thì có địa chỉ đặt được mà sửa
+ * lại không được (hoặc ngược lại). Phạm vi được sửa tới đâu do
+ * `OrdersService.updateShippingAddress` quyết định theo trạng thái đơn.
+ */
+export class UpdateShippingAddressDto extends ShippingAddressDto {}
+
 /** Phần chung của giỏ hàng, dùng cho cả báo giá lẫn đặt hàng. */
 class CartBaseDto {
   @IsArray({ message: 'Giỏ hàng không hợp lệ.' })

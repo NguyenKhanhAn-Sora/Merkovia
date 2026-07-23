@@ -12,10 +12,15 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto, QuoteCartDto } from './dto/create-order.dto';
+import {
+  CreateOrderDto,
+  QuoteCartDto,
+  UpdateShippingAddressDto,
+} from './dto/create-order.dto';
 import {
   CancelOrderDto,
   QueryOrdersDto,
+  RespondCancelDto,
   UpdateOrderStatusDto,
 } from './dto/query-orders.dto';
 import type { OrderStatus } from './schemas/order.schema';
@@ -86,6 +91,33 @@ export class OrdersController {
   ) {
     return this.orders.cancelByBuyer(user, id, dto.reason);
   }
+
+  /**
+   * Sửa địa chỉ giao hàng. Phạm vi được sửa tuỳ trạng thái đơn — service
+   * quyết định và trả về thông báo cụ thể khi từ chối.
+   */
+  @Patch(':id/shipping-address')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  updateAddress(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: UpdateShippingAddressDto,
+  ) {
+    return this.orders.updateShippingAddress(user, id, dto);
+  }
+
+  /** Xin huỷ sau khi người bán đã xác nhận (cần người bán duyệt). */
+  @Post(':id/cancel-request')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  requestCancel(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: CancelOrderDto,
+  ) {
+    return this.orders.requestCancel(user, id, dto.reason);
+  }
 }
 
 /**
@@ -134,5 +166,17 @@ export class ShopOrdersController {
     @Body() dto: CancelOrderDto,
   ) {
     return this.orders.cancelBySeller(user, id, dto.reason);
+  }
+
+  /** Duyệt hoặc từ chối yêu cầu huỷ của người mua. */
+  @Post(':id/cancel-request')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  respondCancel(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: RespondCancelDto,
+  ) {
+    return this.orders.respondCancelRequest(user, id, dto.approve, dto.note);
   }
 }

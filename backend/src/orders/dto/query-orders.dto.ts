@@ -1,5 +1,14 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ORDER_STATUS } from '../schemas/order.schema';
 
 /** Bộ lọc danh sách đơn — dùng chung cho cả người mua và người bán. */
@@ -39,4 +48,16 @@ export class CancelOrderDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+/** Người bán trả lời yêu cầu huỷ của người mua. */
+export class RespondCancelDto {
+  @IsBoolean({ message: 'Vui lòng chọn đồng ý hoặc từ chối.' })
+  approve: boolean;
+
+  /** Lý do từ chối — người mua cần biết vì sao đơn vẫn chạy tiếp. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300, { message: 'Ghi chú tối đa 300 ký tự.' })
+  note?: string;
 }

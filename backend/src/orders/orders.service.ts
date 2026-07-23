@@ -30,7 +30,11 @@ import {
   ShippingProvider,
   type ShippingQuote,
 } from '../shipping/shipping.provider';
-import { CreateOrderDto, QuoteCartDto } from './dto/create-order.dto';
+import {
+  CreateOrderDto,
+  QuoteCartDto,
+  UpdateShippingAddressDto,
+} from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { shortId } from '../common/text';
 import type { UserDocument } from '../users/schemas/user.schema';
@@ -57,7 +61,21 @@ interface CartInput {
 const PAYMENT_WINDOW_MINUTES = 15;
 
 /** Người mua chỉ được huỷ khi người bán chưa bắt đầu chuẩn bị hàng. */
-const BUYER_CANCELLABLE: readonly OrderStatus[] = ['pending_payment', 'pending'];
+/**
+ * Trạng thái còn sửa được địa chỉ. `shipping` trở đi thì hàng đã ở tay hãng
+ * vận chuyển — sửa trong hệ thống mình cũng không đổi được nơi hàng thực sự
+ * đến, chỉ khiến hai bên hiểu sai nhau.
+ */
+const ADDRESS_EDITABLE: readonly OrderStatus[] = [
+  'pending_payment',
+  'pending',
+  'confirmed',
+];
+
+const BUYER_CANCELLABLE: readonly OrderStatus[] = [
+  'pending_payment',
+  'pending',
+];
 /** Người bán được từ chối đơn cho tới trước khi bàn giao vận chuyển. */
 const SELLER_CANCELLABLE: readonly OrderStatus[] = ['pending', 'confirmed'];
 
@@ -87,7 +105,8 @@ export class OrdersService {
   /** Chỉ giữ khuyến mãi còn hiệu lực VÀ thực sự rẻ hơn giá niêm yết. */
   private dealPrice(product: ProductDocument, listPrice: number): number {
     const deal = product.activeDeal;
-    if (!deal || new Date(deal.endsAt).getTime() <= Date.now()) return listPrice;
+    if (!deal || new Date(deal.endsAt).getTime() <= Date.now())
+      return listPrice;
     return deal.price < listPrice ? deal.price : listPrice;
   }
 
@@ -227,6 +246,8 @@ export class OrdersService {
           items: group.items,
           itemsTotal: group.itemsTotal,
           shippingFee: group.shippingFee,
+          // Chốt lại khối lượng để sau còn tính lại cước khi đổi địa chỉ.
+          weightGram: group.weightGram,
           discount: 0,
           total: group.itemsTotal + group.shippingFee,
           status: group.status,
@@ -259,7 +280,7 @@ export class OrdersService {
     let payment: ReturnType<PaymentService['publicPayment']> | null = null;
     if (dto.paymentMethod === 'online') {
       const doc = await this.payments.createForCheckout({
-        buyer: user._id as Types.ObjectId,
+        buyer: user._id,
         checkoutGroup,
         orderIds: created.map((o) => o._id),
         amount: created.reduce((sum, o) => sum + o.total, 0),
@@ -369,7 +390,10 @@ export class OrdersService {
   private async buildGroups(user: UserDocument, dto: CartInput) {
     // Gộp dòng trùng (cùng sản phẩm + cùng phân loại) để không giữ kho hai lần
     // cho một món — client có thể gửi lên hai dòng giống nhau.
-    const merged = new Map<string, { productId: string; variantId: string; quantity: number }>();
+    const merged = new Map<
+      string,
+      { productId: string; variantId: string; quantity: number }
+    >();
     for (const item of dto.items) {
       const key = `${item.productId}:${item.variantId}`;
       const prev = merged.get(key);
@@ -581,6 +605,198 @@ export class OrdersService {
     return this.cancelOrder(order, 'buyer', reason, BUYER_CANCELLABLE);
   }
 
+  /* --------------------------- Sửa địa chỉ ------------------------------ */
+
+  /**
+   * Người mua sửa địa chỉ giao hàng.
+   *
+   * Phân tầng theo thứ mà việc sửa ĐỤNG VÀO, chứ không theo trạng thái đơn:
+   *  - Tên, số điện thoại: không đổi cước, không đổi nơi hàng đến.
+   *  - Số nhà/tên đường trong cùng phường: không đổi cước.
+   *  - Phường/tỉnh: đổi vùng giao ⇒ ĐỔI CƯỚC. Đây là thứ đụng tiền.
+   *
+   * Vì thế:
+   *  - Chưa xác nhận → sửa tất, cước tính lại.
+   *  - Đã xác nhận (`confirmed`) → người bán đang đóng gói, có thể đã in nhãn.
+   *    Khoá phường/tỉnh, chỉ cho sửa tên/SĐT/số nhà.
+   *  - Đang giao trở đi → hàng ở tay hãng vận chuyển, hệ thống không còn quyền.
+   *
+   * 🔴 Đơn ĐÃ TRẢ TIỀN thì không được đổi tỉnh dù đang ở trạng thái nào: cước
+   * mới khác cước đã thu, mà luồng thu thêm/hoàn lại thì chưa có. Thà chặn và
+   * nói rõ còn hơn ghi một con số không khớp với tiền thật.
+   */
+  async updateShippingAddress(
+    user: UserDocument,
+    id: string,
+    dto: UpdateShippingAddressDto,
+  ) {
+    const order = await this.findOwnedByBuyer(user, id);
+
+    if (!ADDRESS_EDITABLE.includes(order.status)) {
+      throw new BadRequestException(
+        order.status === 'cancelled'
+          ? 'Đơn hàng đã huỷ, không sửa được địa chỉ.'
+          : order.status === 'delivered'
+            ? 'Đơn hàng đã giao xong, không sửa được địa chỉ.'
+            : 'Đơn đã bàn giao cho đơn vị vận chuyển nên không đổi được địa chỉ. Vui lòng liên hệ gian hàng.',
+      );
+    }
+
+    const current = order.shippingAddress;
+    const movedProvince =
+      (dto.provinceCode ?? null) !== (current.provinceCode ?? null) ||
+      dto.province.trim() !== current.province;
+    const movedWard =
+      (dto.wardCode ?? null) !== (current.wardCode ?? null) ||
+      (dto.ward?.trim() ?? '') !== (current.ward ?? '');
+
+    if (order.status === 'confirmed' && (movedProvince || movedWard)) {
+      throw new BadRequestException(
+        'Người bán đã xác nhận và đang chuẩn bị hàng nên chỉ đổi được tên, số điện thoại và số nhà. ' +
+          'Muốn giao sang phường/tỉnh khác, vui lòng gửi yêu cầu huỷ đơn rồi đặt lại.',
+      );
+    }
+
+    if (order.paidAt && movedProvince) {
+      throw new BadRequestException(
+        'Đơn đã thanh toán nên không đổi được sang tỉnh/thành khác vì cước vận chuyển sẽ khác. ' +
+          'Bạn vẫn đổi được địa chỉ trong cùng tỉnh/thành.',
+      );
+    }
+
+    // Cước chỉ đổi khi vùng giao đổi, mà vùng giao lại do tỉnh/toạ độ quyết
+    // định — nên chỉ tính lại khi thực sự có thể khác.
+    let shippingFee = order.shippingFee;
+    if (movedProvince || movedWard) {
+      shippingFee = await this.requoteShipping(order, dto);
+    }
+
+    order.shippingAddress = {
+      ...current,
+      label: dto.label?.trim() ?? current.label,
+      recipientName: dto.recipientName.trim(),
+      recipientPhone: dto.recipientPhone.trim(),
+      street: dto.street.trim(),
+      ward: dto.ward?.trim(),
+      wardCode: dto.wardCode,
+      district: dto.district?.trim(),
+      province: dto.province.trim(),
+      provinceCode: dto.provinceCode,
+      lat: dto.lat,
+      lng: dto.lng,
+    };
+    order.shippingFee = shippingFee;
+    order.total = order.itemsTotal + shippingFee - order.discount;
+    order.addressUpdatedAt = new Date();
+    await order.save();
+
+    return { order: this.toBuyerOrder(order, true) };
+  }
+
+  /** Cước cho địa chỉ mới, dùng đúng khối lượng đã chốt lúc đặt. */
+  private async requoteShipping(
+    order: OrderDocument,
+    to: UpdateShippingAddressDto,
+  ): Promise<number> {
+    const shop = await this.shopModel.findById(order.shop);
+    // Gian hàng bị xoá thì coi như không biết điểm gửi — biểu cước tự lùi về
+    // mức liên tỉnh thay vì nổ, đơn đã đặt rồi vẫn phải giao được.
+    const pickup: Partial<NonNullable<ShopDocument['pickupAddress']>> =
+      shop?.pickupAddress ?? {};
+    return this.shipping.quote({
+      from: {
+        provinceCode: pickup.provinceCode,
+        wardCode: pickup.wardCode,
+        lat: pickup.lat,
+        lng: pickup.lng,
+      },
+      to: {
+        provinceCode: to.provinceCode,
+        wardCode: to.wardCode,
+        lat: to.lat,
+        lng: to.lng,
+      },
+      weightGram: order.weightGram,
+      itemsTotal: order.itemsTotal,
+    }).fee;
+  }
+
+  /* ------------------------- Yêu cầu huỷ đơn ---------------------------- */
+
+  /**
+   * Người mua xin huỷ sau khi người bán đã xác nhận.
+   *
+   * Không cho huỷ thẳng vì hàng có thể đã đóng gói; nhưng cũng không chặn cứng
+   * — người mua đổi ý hay chuyển nhà mà không có đường ra thì chỉ còn cách từ
+   * chối nhận hàng, tệ hơn cho cả hai bên.
+   */
+  async requestCancel(user: UserDocument, id: string, reason?: string) {
+    const order = await this.findOwnedByBuyer(user, id);
+
+    if (BUYER_CANCELLABLE.includes(order.status)) {
+      throw new BadRequestException(
+        'Đơn này bạn huỷ được ngay, không cần gửi yêu cầu.',
+      );
+    }
+    if (order.status !== 'confirmed') {
+      throw new BadRequestException(
+        order.status === 'cancelled'
+          ? 'Đơn hàng này đã được huỷ.'
+          : 'Đơn đã bàn giao vận chuyển nên không huỷ được nữa.',
+      );
+    }
+    if (order.cancelRequest?.status === 'pending') {
+      throw new BadRequestException(
+        'Bạn đã gửi yêu cầu huỷ, vui lòng chờ người bán phản hồi.',
+      );
+    }
+
+    order.cancelRequest = {
+      reason: reason?.trim(),
+      requestedAt: new Date(),
+      status: 'pending',
+    };
+    await order.save();
+    return { ok: true, order: this.toBuyerOrder(order, true) };
+  }
+
+  /** Người bán duyệt hoặc từ chối yêu cầu huỷ. */
+  async respondCancelRequest(
+    user: UserDocument,
+    id: string,
+    approve: boolean,
+    note?: string,
+  ) {
+    const order = await this.findOwnedByShop(user, id);
+    if (order.cancelRequest?.status !== 'pending') {
+      throw new BadRequestException('Đơn này không có yêu cầu huỷ đang chờ.');
+    }
+
+    if (!approve) {
+      order.cancelRequest.status = 'rejected';
+      order.cancelRequest.respondedAt = new Date();
+      order.cancelRequest.sellerNote = note?.trim();
+      order.markModified('cancelRequest');
+      await order.save();
+      return { ok: true, order: this.toSellerOrder(order, true) };
+    }
+
+    // Đánh dấu ĐÃ DUYỆT trước, rồi mới huỷ. `cancelOrder` giành quyền bằng
+    // updateOne có điều kiện nên phải ghi phần này xong xuôi trước đó.
+    order.cancelRequest.status = 'approved';
+    order.cancelRequest.respondedAt = new Date();
+    order.cancelRequest.sellerNote = note?.trim();
+    order.markModified('cancelRequest');
+    await order.save();
+
+    return this.cancelOrder(
+      order,
+      'buyer', // người mua mới là bên muốn huỷ; người bán chỉ chấp thuận
+      order.cancelRequest.reason || 'Người mua yêu cầu huỷ',
+      SELLER_CANCELLABLE,
+    );
+  }
+
   /** Người bán từ chối / huỷ đơn (hết hàng, sai giá…). */
   async cancelBySeller(user: UserDocument, id: string, reason?: string) {
     const order = await this.findOwnedByShop(user, id);
@@ -771,12 +987,15 @@ export class OrdersService {
       this.countByStatus({ shop: shop._id }),
       this.orderModel.aggregate<{ _id: null; total: number; orders: number }>([
         { $match: { shop: shop._id, status: 'delivered' } },
-        { $group: { _id: null, total: { $sum: '$itemsTotal' }, orders: { $sum: 1 } } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$itemsTotal' },
+            orders: { $sum: 1 },
+          },
+        },
       ]),
-      this.orderModel
-        .find({ shop: shop._id })
-        .sort({ createdAt: -1 })
-        .limit(5),
+      this.orderModel.find({ shop: shop._id }).sort({ createdAt: -1 }).limit(5),
       // Bán chạy trong 30 ngày — mở từng dòng hàng ra rồi gom theo sản phẩm.
       this.orderModel.aggregate<{
         _id: Types.ObjectId;
@@ -838,10 +1057,10 @@ export class OrdersService {
 
   /** Số đơn theo từng trạng thái — cho badge trên thanh tab. */
   private async countByStatus(match: Record<string, unknown>) {
-    const rows = await this.orderModel.aggregate<{ _id: OrderStatus; n: number }>([
-      { $match: match },
-      { $group: { _id: '$status', n: { $sum: 1 } } },
-    ]);
+    const rows = await this.orderModel.aggregate<{
+      _id: OrderStatus;
+      n: number;
+    }>([{ $match: match }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
     const counts: Record<string, number> = { all: 0 };
     for (const r of rows) {
       counts[r._id] = r.n;
@@ -890,6 +1109,16 @@ export class OrdersService {
       ...this.baseOrder(o),
       shop: { name: o.shopName, slug: o.shopSlug },
       canCancel: BUYER_CANCELLABLE.includes(o.status),
+      /**
+       * Giao diện đọc ba cờ này thay vì tự suy từ trạng thái — quy tắc nằm ở
+       * MỘT nơi, và cái nút hiện ra luôn khớp với cái backend chấp nhận.
+       */
+      canEditAddress: ADDRESS_EDITABLE.includes(o.status),
+      // Đã xác nhận hoặc đã trả tiền thì chỉ sửa được trong cùng tỉnh/thành.
+      addressLocked: o.status === 'confirmed' || !!o.paidAt,
+      canRequestCancel:
+        o.status === 'confirmed' && o.cancelRequest?.status !== 'pending',
+      cancelRequest: o.cancelRequest,
       ...(full
         ? { shippingAddress: o.shippingAddress, timeline: o.timeline }
         : {}),
@@ -901,8 +1130,14 @@ export class OrdersService {
       ...this.baseOrder(o),
       // Người bán cần thông tin giao hàng ngay ở danh sách để chuẩn bị đóng gói.
       shippingAddress: o.shippingAddress,
-      nextStatus: ALLOWED_TRANSITIONS[o.status].filter((s) => s !== 'cancelled'),
+      nextStatus: ALLOWED_TRANSITIONS[o.status].filter(
+        (s) => s !== 'cancelled',
+      ),
       canCancel: SELLER_CANCELLABLE.includes(o.status),
+      // Người bán phải thấy hai thứ này ngay ở DANH SÁCH: địa chỉ sửa sau khi
+      // đã in nhãn thì phải in lại, còn yêu cầu huỷ để treo là người mua chờ.
+      addressUpdatedAt: o.addressUpdatedAt,
+      cancelRequest: o.cancelRequest,
       ...(full ? { timeline: o.timeline } : {}),
     };
   }
@@ -937,7 +1172,9 @@ export class OrdersService {
       }
     }
     if (cancelled) {
-      this.logger.log(`Đã huỷ ${cancelled} đơn quá hạn thanh toán và hoàn kho.`);
+      this.logger.log(
+        `Đã huỷ ${cancelled} đơn quá hạn thanh toán và hoàn kho.`,
+      );
     }
     return cancelled;
   }
