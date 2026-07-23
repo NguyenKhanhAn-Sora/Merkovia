@@ -3,8 +3,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
-import { Category, CategoryDocument } from '../categories/schemas/category.schema';
+import {
+  Category,
+  CategoryDocument,
+} from '../categories/schemas/category.schema';
 import { BrowseProductsDto } from './dto/browse-products.dto';
+import { isDealLive } from '../products/deal';
 import { buildSearchText } from '../common/text';
 
 /** Sắp xếp cho người mua → điều kiện sort của Mongo. */
@@ -80,7 +84,9 @@ export class CatalogService {
     if (query.category) {
       const category = Types.ObjectId.isValid(query.category)
         ? await this.categoryModel.findById(query.category).select('_id')
-        : await this.categoryModel.findOne({ slug: query.category }).select('_id');
+        : await this.categoryModel
+            .findOne({ slug: query.category })
+            .select('_id');
       if (!category) {
         return { items: [], total: 0, page, limit };
       }
@@ -88,7 +94,9 @@ export class CatalogService {
     }
 
     if (query.shop) {
-      const shop = await this.shopModel.findOne({ slug: query.shop }).select('_id');
+      const shop = await this.shopModel
+        .findOne({ slug: query.shop })
+        .select('_id');
       if (!shop) return { items: [], total: 0, page, limit };
       match.shop = shop._id;
     }
@@ -122,7 +130,12 @@ export class CatalogService {
         },
       },
       { $unwind: '$shopDoc' },
-      { $match: { 'shopDoc.status': 'active', 'shopDoc.vacationMode': { $ne: true } } },
+      {
+        $match: {
+          'shopDoc.status': 'active',
+          'shopDoc.vacationMode': { $ne: true },
+        },
+      },
       { $sort: SORTS[query.sort ?? 'newest'] },
       {
         $facet: {
@@ -260,7 +273,11 @@ export class CatalogService {
     });
 
     return {
-      shop: { ...this.publicShop(shop), productCount, vacationMode: shop.vacationMode },
+      shop: {
+        ...this.publicShop(shop),
+        productCount,
+        vacationMode: shop.vacationMode,
+      },
     };
   }
 

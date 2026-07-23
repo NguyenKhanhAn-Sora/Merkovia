@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Product, ProductSchema } from './schemas/product.schema';
 import { ProductsService } from './products.service';
+import { PromotionsService } from './promotions.service';
+import { PromotionsController } from './promotions.controller';
 import { ProductsController } from './products.controller';
 import { ShopsModule } from '../shops/shops.module';
 import { CategoriesModule } from '../categories/categories.module';
@@ -16,9 +18,9 @@ import { MediaModule } from '../media/media.module';
     AuthModule, // JwtAuthGuard
     MediaModule, // xoá ảnh R2 khi dọn thùng rác
   ],
-  controllers: [ProductsController],
-  providers: [ProductsService],
+  controllers: [ProductsController, PromotionsController],
+  providers: [ProductsService, PromotionsService],
   // OrdersModule dùng ProductsService để giữ/hoàn kho khi tạo & huỷ đơn.
-  exports: [MongooseModule, ProductsService],
+  exports: [MongooseModule, ProductsService, PromotionsService],
 })
 export class ProductsModule {}

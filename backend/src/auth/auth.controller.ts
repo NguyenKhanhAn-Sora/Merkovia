@@ -180,6 +180,14 @@ export class AuthController {
     return this.accountService.updateShop(readAccessToken(req), dto);
   }
 
+  /** Đánh dấu đã xong checklist "Hoàn thiện gian hàng" — không hiện lại nữa. */
+  @Post('my-shop/setup-done')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  markSetupDone(@Req() req: Request) {
+    return this.accountService.markSetupDone(readAccessToken(req));
+  }
+
   /** Đổi logo gian hàng. */
   @Patch('my-shop/logo')
   @HttpCode(HttpStatus.OK)

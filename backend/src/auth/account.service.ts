@@ -43,6 +43,11 @@ import { MailService } from './mail.service';
 const SELLER_DEFAULT_AVATAR = '/avatar_seller.png';
 const SHOP_DEFAULT_LOGO = SELLER_DEFAULT_AVATAR;
 
+/** Có phải logo do shop tự tải lên không (khác ảnh mặc định của hệ thống). */
+function isCustomLogo(url?: string): boolean {
+  return !!url && !url.includes('avatar_seller');
+}
+
 /** Tên shop chỉ được đổi 1 lần trong khoảng thời gian này. */
 const NAME_CHANGE_COOLDOWN_DAYS = 30;
 
@@ -498,6 +503,8 @@ export class AccountService {
               logoUrl: dto.logoUrl || SHOP_DEFAULT_LOGO,
               logoOriginalUrl: dto.logoOriginalUrl,
               logoCrop: dto.logoCrop,
+              // Chọn logo riêng ngay ở bước đăng ký cũng tính là đã làm xong.
+              logoSetAt: isCustomLogo(dto.logoUrl) ? new Date() : undefined,
               // Bán được ngay; admin chỉ đình chỉ khi vi phạm chính sách.
               status: 'active',
             },
@@ -600,8 +607,32 @@ export class AccountService {
         // null = đổi tên được ngay; có giá trị ở tương lai = đang trong 30 ngày chờ.
         nameChangeAvailableAt:
           this.nameChangeAvailableAt(shop)?.toISOString() ?? null,
+        setup: {
+          // `logoSetAt` chỉ có từ khi thêm cột này; shop cũ suy ra từ logo hiện tại.
+          logoDone: !!shop.logoSetAt || isCustomLogo(shop.logoUrl),
+          hasBank: !!shop.bankAccount,
+          doneAt: shop.setupDoneAt?.toISOString() ?? null,
+        },
       },
     };
+  }
+
+  /**
+   * Đánh dấu đã hoàn tất checklist "Hoàn thiện gian hàng" (chỉ ghi lần đầu).
+   *
+   * Cố tình KHÔNG kiểm lại từng bước ở server: cờ này chỉ quyết định có hiện
+   * một tấm thẻ hướng dẫn hay không. Gọi khống thì người bán tự giấu bảng
+   * hướng dẫn của chính mình — không đụng tới tiền, đơn hay quyền gì cả.
+   */
+  async markSetupDone(accessToken?: string) {
+    const user = await this.userFromAccessToken(accessToken);
+    const shop = await this.shopModel.findOneAndUpdate(
+      { owner: user._id, setupDoneAt: { $exists: false } },
+      { $set: { setupDoneAt: new Date() } },
+      { new: true },
+    );
+    // Không khớp = đã đánh dấu từ trước (hoặc chưa có shop) → coi như xong.
+    return { ok: true, doneAt: shop?.setupDoneAt?.toISOString() ?? null };
   }
 
   /**
@@ -735,6 +766,9 @@ export class AccountService {
     // Ảnh gốc/crop chỉ có khi user tự tải ảnh lên; quay về logo mặc định thì xoá.
     shop.logoOriginalUrl = dto.logoOriginalUrl;
     shop.logoCrop = dto.logoCrop;
+    // Chỉ ghi lần đầu và không bao giờ xoá: đây là mốc "đã từng đặt logo riêng",
+    // không phải cờ "hiện đang có logo riêng".
+    if (isCustomLogo(dto.logoUrl) && !shop.logoSetAt) shop.logoSetAt = new Date();
     await shop.save();
 
     return { ok: true, logoUrl: shop.logoUrl };
@@ -791,6 +825,8 @@ export class AccountService {
               logoUrl: dto.logoUrl || SHOP_DEFAULT_LOGO,
               logoOriginalUrl: dto.logoOriginalUrl,
               logoCrop: dto.logoCrop,
+              // Chọn logo riêng ngay ở bước đăng ký cũng tính là đã làm xong.
+              logoSetAt: isCustomLogo(dto.logoUrl) ? new Date() : undefined,
               // Bán được ngay; admin chỉ đình chỉ khi vi phạm chính sách.
               status: 'active',
             },

@@ -179,6 +179,21 @@ export class Shop {
   @Prop({ type: Object })
   logoCrop?: Record<string, unknown>;
 
+  /**
+   * Lần ĐẦU shop đặt logo riêng. Việc "đã thêm logo" là một việc đã làm, không
+   * phải trạng thái hiện tại — quay về logo mặc định sau đó không xoá đi việc
+   * đã làm, nên checklist không được bỏ tick.
+   */
+  @Prop()
+  logoSetAt?: Date;
+
+  /**
+   * Lần đầu checklist "Hoàn thiện gian hàng" đủ 4/4. Có giá trị = đã xong hẳn,
+   * không hiện lại nữa dù về sau shop xoá hết sản phẩm hay đổi lại logo.
+   */
+  @Prop()
+  setupDoneAt?: Date;
+
   @Prop({ type: String, enum: SHOP_STATUS, default: 'active', index: true })
   status: ShopStatus;
 

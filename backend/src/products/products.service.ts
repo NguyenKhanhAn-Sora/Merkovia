@@ -20,6 +20,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { CreateProductDto, VariantDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
+import { isDealLive } from './deal';
 import { buildSearchText, shortId, slugify } from '../common/text';
 import type { UserDocument } from '../users/schemas/user.schema';
 
@@ -135,9 +136,7 @@ export class ProductsService {
     // Không bắt buộc đủ mọi tổ hợp (Đỏ có thể chỉ có size 60), nhưng phải còn
     // ít nhất một tổ hợp đang bán — nếu không sản phẩm chẳng mua được gì.
     if (!variants.some((v) => v.isActive !== false)) {
-      throw new BadRequestException(
-        'Cần ít nhất một phân loại đang được bán.',
-      );
+      throw new BadRequestException('Cần ít nhất một phân loại đang được bán.');
     }
   }
 
@@ -199,7 +198,9 @@ export class ProductsService {
 
     const category = await this.categories.resolveForProduct(dto.categoryId);
     if (!category) {
-      throw new BadRequestException('Danh mục không tồn tại hoặc đã ngừng dùng.');
+      throw new BadRequestException(
+        'Danh mục không tồn tại hoặc đã ngừng dùng.',
+      );
     }
     this.validateVariants(dto.optionTiers, dto.variants);
 
@@ -283,6 +284,15 @@ export class ProductsService {
         sold: p.stats?.sold ?? 0,
         status: p.status,
         variantCount: p.variants?.length ?? 0,
+        /**
+         * Khuyến mãi ĐANG chạy. Thiếu nó thì danh sách ghi giá niêm yết trong
+         * khi khách đang trả giá sale — sai với đúng người cần biết nhất.
+         * Lọc bằng `isDealLive` để chương trình hẹn giờ hoặc đã hết hạn không
+         * hiện thành "đang giảm giá".
+         */
+        deal: isDealLive(p.activeDeal)
+          ? { price: p.activeDeal!.price, endsAt: p.activeDeal!.endsAt }
+          : undefined,
         updatedAt: (p as { updatedAt?: Date }).updatedAt,
         // Có giá trị = đang ở thùng rác; client dùng để tính số ngày còn lại.
         deletedAt: p.deletedAt ?? undefined,
@@ -291,7 +301,7 @@ export class ProductsService {
       page,
       limit,
       /** Số lượng theo từng tab để hiển thị badge. */
-      counts: await this.countByStatus(shop._id as Types.ObjectId),
+      counts: await this.countByStatus(shop._id),
     };
   }
 
@@ -303,7 +313,10 @@ export class ProductsService {
       this.productModel.countDocuments({ ...base, status: 'active' }),
       this.productModel.countDocuments({ ...base, status: 'hidden' }),
       this.productModel.countDocuments({ ...base, totalStock: 0 }),
-      this.productModel.countDocuments({ shop: shopId, deletedAt: { $ne: null } }),
+      this.productModel.countDocuments({
+        shop: shopId,
+        deletedAt: { $ne: null },
+      }),
     ]);
     return { all, draft, active, hidden, out, deleted };
   }
@@ -315,7 +328,11 @@ export class ProductsService {
    * `includeDeleted` chỉ bật cho việc XEM và KHÔI PHỤC; sửa/xoá thì không,
    * vì sửa một sản phẩm đang nằm trong thùng rác là vô nghĩa.
    */
-  private async findOwned(user: UserDocument, id: string, includeDeleted = false) {
+  private async findOwned(
+    user: UserDocument,
+    id: string,
+    includeDeleted = false,
+  ) {
     const shop = await this.requireShop(user);
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Không tìm thấy sản phẩm.');
@@ -352,7 +369,9 @@ export class ProductsService {
     if (dto.categoryId) {
       const category = await this.categories.resolveForProduct(dto.categoryId);
       if (!category) {
-        throw new BadRequestException('Danh mục không tồn tại hoặc đã ngừng dùng.');
+        throw new BadRequestException(
+          'Danh mục không tồn tại hoặc đã ngừng dùng.',
+        );
       }
       product.category = category.id;
       product.categoryPath = category.path;
@@ -362,15 +381,11 @@ export class ProductsService {
     // optionTiers và variants phải được kiểm CÙNG NHAU, kể cả khi chỉ đổi một cái.
     if (dto.optionTiers !== undefined || dto.variants !== undefined) {
       const tiers = dto.optionTiers ?? product.optionTiers;
-      const variants = (dto.variants ??
-        product.variants) as unknown as VariantDto[];
+      const variants = dto.variants ?? product.variants;
       this.validateVariants(tiers, variants);
       if (dto.optionTiers !== undefined) product.optionTiers = dto.optionTiers;
       if (dto.variants !== undefined) {
-        product.variants = this.mergeVariants(
-          product.variants,
-          dto.variants,
-        ) as typeof product.variants;
+        product.variants = this.mergeVariants(product.variants, dto.variants);
       }
     }
 
@@ -603,10 +618,9 @@ export class ProductsService {
 
     // Xoá ảnh trước để không bỏ lại file mồ côi trên R2 khi bản ghi biến mất.
     for (const p of expired) {
-      const keys = [
-        ...(p.images ?? []).map((i) => i.key),
-        p.video?.key,
-      ].filter((k): k is string => !!k);
+      const keys = [...(p.images ?? []).map((i) => i.key), p.video?.key].filter(
+        (k): k is string => !!k,
+      );
       for (const key of keys) {
         try {
           await this.media.delete(key);

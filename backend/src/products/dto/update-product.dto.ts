@@ -87,7 +87,7 @@ export class UpdateProductDto {
   shipping?: ShippingDto;
 
   @IsOptional()
-  @IsIn(PRODUCT_STATUS as unknown as string[], {
+  @IsIn(PRODUCT_STATUS, {
     message: 'Trạng thái không hợp lệ.',
   })
   status?: string;

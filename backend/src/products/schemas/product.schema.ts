@@ -169,7 +169,13 @@ export class Product {
   @Prop({ trim: true, required: true, maxlength: 150 })
   name: string;
 
-  @Prop({ trim: true, lowercase: true, unique: true, sparse: true, maxlength: 80 })
+  @Prop({
+    trim: true,
+    lowercase: true,
+    unique: true,
+    sparse: true,
+    maxlength: 80,
+  })
   slug?: string;
 
   @Prop({ maxlength: 5000 })
@@ -180,7 +186,11 @@ export class Product {
   category: Types.ObjectId;
 
   /** Tổ tiên + chính nó → lọc cả nhánh danh mục bằng một index. */
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Category' }], default: [], index: true })
+  @Prop({
+    type: [{ type: Types.ObjectId, ref: 'Category' }],
+    default: [],
+    index: true,
+  })
   categoryPath: Types.ObjectId[];
 
   /* ------------------------- Biến thể (tối đa 2 tầng) --------------------- */
