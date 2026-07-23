@@ -14,6 +14,3 @@ panel bên dưới
 đánh giá không
 - trang sản phẩm của seller bị vỡ UI, hình ảnh của trang đơn hàng trong 
 seller cũng không hiển thị được hình ảnh sản phẩm
-- tạo khuyến mãi khi nhập giá thì nên có phân cách phần nghìn bằng dấu chấm
-- khi tạo khuyến mãi cho 1 sản phẩm thì có nên cập nhật giá trong list sản phẩm 
-của shop luôn không
