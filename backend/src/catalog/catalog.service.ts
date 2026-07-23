@@ -49,9 +49,10 @@ export class CatalogService {
    * Promotion ghi xuống nên có thể còn sót lại sau khi hết giờ — phải tự lọc,
    * nếu không người mua thấy giá sale mà lúc đặt lại tính giá gốc.
    */
-  private publicDeal(deal?: { price: number; endsAt: Date }) {
-    if (!deal || new Date(deal.endsAt).getTime() <= Date.now()) return undefined;
-    return { price: deal.price, endsAt: deal.endsAt };
+  private publicDeal(deal?: { price: number; startsAt?: Date; endsAt: Date }) {
+    // Chưa tới giờ hoặc đã hết giờ đều coi như không có khuyến mãi.
+    if (!isDealLive(deal)) return undefined;
+    return { price: deal!.price, endsAt: deal!.endsAt };
   }
 
   /** Chỉ giữ biến thể đang bán — người mua không được thấy tổ hợp đã tắt. */

@@ -39,10 +39,7 @@ export class PaymentsController {
   @Post('lookup')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 15, ttl: 60_000 } })
-  lookup(
-    @CurrentUser() user: UserDocument,
-    @Body() dto: LookupBankAccountDto,
-  ) {
+  lookup(@CurrentUser() user: UserDocument, @Body() dto: LookupBankAccountDto) {
     return this.payments.lookup(user, dto);
   }
 

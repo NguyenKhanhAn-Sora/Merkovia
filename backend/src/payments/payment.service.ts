@@ -135,7 +135,10 @@ export class PaymentService {
           : 'Đơn hàng này không ở trạng thái chờ thanh toán.',
       );
     }
-    if (order.paymentExpiresAt && order.paymentExpiresAt.getTime() < Date.now()) {
+    if (
+      order.paymentExpiresAt &&
+      order.paymentExpiresAt.getTime() < Date.now()
+    ) {
       throw new BadRequestException(
         'Đã quá hạn thanh toán cho đơn này. Vui lòng đặt lại.',
       );
@@ -161,7 +164,7 @@ export class PaymentService {
     }
 
     const payment = await this.createPayment({
-      buyer: user._id as Types.ObjectId,
+      buyer: user._id,
       checkoutGroup: order.checkoutGroup!,
       orderIds: payable.map((o) => o._id),
       amount: payable.reduce((sum, o) => sum + o.total, 0),
@@ -192,7 +195,9 @@ export class PaymentService {
     const verified = this.gateway.verifyWebhook(rawBody, headers);
     if (!verified.valid || !verified.event) {
       this.logger.warn(`Webhook bị từ chối: ${verified.reason ?? 'không rõ'}`);
-      throw new UnauthorizedException(verified.reason ?? 'Webhook không hợp lệ.');
+      throw new UnauthorizedException(
+        verified.reason ?? 'Webhook không hợp lệ.',
+      );
     }
 
     const event = verified.event;
@@ -419,7 +424,8 @@ export class PaymentService {
 
   async getByCode(code: string) {
     const payment = await this.paymentModel.findOne({ code });
-    if (!payment) throw new NotFoundException('Không tìm thấy phiên thanh toán.');
+    if (!payment)
+      throw new NotFoundException('Không tìm thấy phiên thanh toán.');
     return payment;
   }
 
@@ -429,8 +435,49 @@ export class PaymentService {
       code,
       buyer: user._id,
     });
-    if (!payment) throw new NotFoundException('Không tìm thấy phiên thanh toán.');
+    if (!payment)
+      throw new NotFoundException('Không tìm thấy phiên thanh toán.');
     return { payment: this.publicPayment(payment) };
+  }
+
+  /**
+   * Đánh dấu phiên thanh toán cần hoàn tiền cho một đơn đã huỷ.
+   *
+   * 🔴 Lỗ hổng này từng để tiền của khách biến mất khỏi mọi báo cáo: đơn trả
+   * tiền online rồi bị huỷ (người bán hết hàng, giao thất bại…) thì kho được
+   * hoàn, đơn chuyển sang `cancelled`, nhưng TIỀN vẫn nằm im ở sàn và không ai
+   * biết là phải trả lại. Không tự hoàn được vì chưa có cổng thanh toán thật —
+   * nhưng ít nhất phải ghi thành một khoản nợ nhìn thấy được.
+   *
+   * Một phiên có thể trả cho NHIỀU đơn (giỏ nhiều gian hàng), nên lý do phải
+   * ghi rõ đơn nào và bao nhiêu tiền, cộng dồn qua từng lần huỷ.
+   */
+  async flagRefundForOrder(input: {
+    paymentId: Types.ObjectId;
+    orderCode: string;
+    amount: number;
+    reason: string;
+  }): Promise<void> {
+    const note = `Đơn ${input.orderCode} đã huỷ (${input.reason}) — cần hoàn ${input.amount.toLocaleString('vi-VN')}đ.`;
+    try {
+      const payment = await this.paymentModel.findById(input.paymentId);
+      // Chưa thu được tiền thì không có gì để hoàn.
+      if (!payment || payment.status !== 'paid') return;
+
+      payment.needsRefund = true;
+      payment.refundReason = payment.refundReason
+        ? `${payment.refundReason} | ${note}`
+        : note;
+      await payment.save();
+
+      // Ghi to vào log: đây là tiền thật của người khác đang nằm ở chỗ mình.
+      this.logger.error(`CẦN HOÀN TIỀN — phiên ${payment.code}: ${note}`);
+    } catch (err: unknown) {
+      // Không được làm hỏng việc huỷ đơn: kho đã hoàn, đơn đã đóng.
+      this.logger.error(
+        `Không đánh dấu được hoàn tiền cho ${input.orderCode}: ${String(err)}`,
+      );
+    }
   }
 
   /** Các phiên cần hoàn tiền — dữ liệu cho trang quản trị sau này. */

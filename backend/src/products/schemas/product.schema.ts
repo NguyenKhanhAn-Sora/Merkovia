@@ -134,8 +134,22 @@ const ProductStatsSchema = SchemaFactory.createForClass(ProductStats);
  */
 @Schema({ _id: false })
 export class ActiveDeal {
+  /**
+   * Giá bán trong thời gian khuyến mãi — áp cho MỌI phân loại.
+   *
+   * 🔴 Bắt buộc thấp hơn `priceMin` (phân loại rẻ nhất). Thẻ sản phẩm tính
+   * phần trăm giảm và gạch ngang đều dựa trên `priceMin`, nên giá sale cao hơn
+   * nó sẽ hiện "giá khuyến mãi" đắt hơn "giá gốc" — vô lý với người mua.
+   */
   @Prop({ required: true, min: 0 })
   price: number;
+
+  /**
+   * Mốc bắt đầu. Để trống = chạy ngay.
+   * Có trường này thì mới hẹn giờ được flash sale thay vì phải ngồi canh bấm.
+   */
+  @Prop()
+  startsAt?: Date;
 
   @Prop({ required: true })
   endsAt: Date;

@@ -42,7 +42,18 @@ export abstract class BankLookupProvider {
 
 const HO = ['NGUYEN', 'TRAN', 'LE', 'PHAM', 'HOANG', 'VU', 'DANG', 'BUI'];
 const DEM = ['VAN', 'THI', 'HUU', 'DUC', 'MINH', 'NGOC', 'THANH', 'QUOC'];
-const TEN = ['AN', 'BINH', 'CUONG', 'DUNG', 'HA', 'KHANH', 'LINH', 'MAI', 'NAM', 'SON'];
+const TEN = [
+  'AN',
+  'BINH',
+  'CUONG',
+  'DUNG',
+  'HA',
+  'KHANH',
+  'LINH',
+  'MAI',
+  'NAM',
+  'SON',
+];
 
 /**
  * Tra cứu giả lập — KHÔNG gọi ra ngoài.

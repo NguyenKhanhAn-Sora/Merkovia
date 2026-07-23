@@ -97,8 +97,7 @@ export class PayoutService {
       commissionRate: config.commissionRate,
       holdDays: config.payoutHoldDays,
       minPayout: MIN_PAYOUT_AMOUNT,
-      canRequest:
-        available.net >= MIN_PAYOUT_AMOUNT && !!shop.bankAccount,
+      canRequest: available.net >= MIN_PAYOUT_AMOUNT && !!shop.bankAccount,
       hasBankAccount: !!shop.bankAccount,
       provider: { name: this.provider.name, isReal: this.provider.isReal },
     };
@@ -110,11 +109,22 @@ export class PayoutService {
       count: number;
     }>([
       { $match: match },
-      { $group: { _id: null, gross: { $sum: '$itemsTotal' }, count: { $sum: 1 } } },
+      {
+        $group: {
+          _id: null,
+          gross: { $sum: '$itemsTotal' },
+          count: { $sum: 1 },
+        },
+      },
     ]);
     const gross = rows[0]?.gross ?? 0;
     const commission = Math.round(gross * config.commissionRate);
-    return { gross, commission, net: gross - commission, count: rows[0]?.count ?? 0 };
+    return {
+      gross,
+      commission,
+      net: gross - commission,
+      count: rows[0]?.count ?? 0,
+    };
   }
 
   /* ----------------------------- Tạo đợt chi ---------------------------- */
@@ -200,7 +210,11 @@ export class PayoutService {
     }
 
     await this.sendTransfer(payout);
-    return { payout: this.publicPayout(await this.payoutModel.findById(payoutId) as PayoutDocument) };
+    return {
+      payout: this.publicPayout(
+        (await this.payoutModel.findById(payoutId)) as PayoutDocument,
+      ),
+    };
   }
 
   /**
@@ -273,7 +287,12 @@ export class PayoutService {
         .limit(limit),
       this.payoutModel.countDocuments({ shop: shop._id }),
     ]);
-    return { items: items.map((p) => this.publicPayout(p)), total, page, limit };
+    return {
+      items: items.map((p) => this.publicPayout(p)),
+      total,
+      page,
+      limit,
+    };
   }
 
   private publicPayout(p: PayoutDocument) {

@@ -39,7 +39,10 @@ export const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> =
     pending_payment: ['pending', 'cancelled'],
     pending: ['confirmed', 'cancelled'],
     confirmed: ['shipping', 'cancelled'],
-    shipping: ['delivered'],
+    // `cancelled` ở đây là GIAO THẤT BẠI (hàng trả về người bán). Không có
+    // đường này thì đơn giao hỏng kẹt ở "Đang giao" vĩnh viễn: kho không được
+    // hoàn, tiền không ai trả lại.
+    shipping: ['delivered', 'cancelled'],
     delivered: [],
     cancelled: [],
   };

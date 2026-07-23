@@ -107,6 +107,14 @@ export class OrdersController {
     return this.orders.updateShippingAddress(user, id, dto);
   }
 
+  /** Người mua xác nhận đã nhận được hàng → mở khoá tiền cho người bán. */
+  @Post(':id/received')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  confirmReceived(@CurrentUser() user: UserDocument, @Param('id') id: string) {
+    return this.orders.confirmReceived(user, id);
+  }
+
   /** Xin huỷ sau khi người bán đã xác nhận (cần người bán duyệt). */
   @Post(':id/cancel-request')
   @HttpCode(HttpStatus.OK)
@@ -166,6 +174,18 @@ export class ShopOrdersController {
     @Body() dto: CancelOrderDto,
   ) {
     return this.orders.cancelBySeller(user, id, dto.reason);
+  }
+
+  /** Giao hàng thất bại — hàng trả về, hoàn kho và đánh dấu hoàn tiền. */
+  @Post(':id/delivery-failed')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  deliveryFailed(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: CancelOrderDto,
+  ) {
+    return this.orders.markDeliveryFailed(user, id, dto.reason);
   }
 
   /** Duyệt hoặc từ chối yêu cầu huỷ của người mua. */

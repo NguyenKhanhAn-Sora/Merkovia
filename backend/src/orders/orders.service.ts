@@ -36,6 +36,7 @@ import {
   UpdateShippingAddressDto,
 } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
+import { isDealLive } from '../products/deal';
 import { shortId } from '../common/text';
 import type { UserDocument } from '../users/schemas/user.schema';
 
@@ -59,6 +60,15 @@ interface CartInput {
 
 /** Thời gian giữ kho cho đơn chờ thanh toán online. */
 const PAYMENT_WINDOW_MINUTES = 15;
+
+/**
+ * Số ngày kể từ lúc bàn giao vận chuyển thì tự coi là đã giao thành công.
+ *
+ * Đặt rộng hơn mức giao chậm nhất của biểu cước (tuyến xa 6 ngày) cộng thêm
+ * vài ngày để người mua kịp phản hồi — chốt sớm quá là chốt lúc hàng còn trên
+ * đường, mà `delivered` thì mở khoá tiền cho người bán.
+ */
+const AUTO_CONFIRM_DAYS = 10;
 
 /** Người mua chỉ được huỷ khi người bán chưa bắt đầu chuẩn bị hàng. */
 /**
@@ -102,12 +112,17 @@ export class OrdersService {
     return `MK${Date.now().toString(36)}${shortId()}`.toUpperCase();
   }
 
-  /** Chỉ giữ khuyến mãi còn hiệu lực VÀ thực sự rẻ hơn giá niêm yết. */
+  /**
+   * Chỉ giữ khuyến mãi ĐANG chạy VÀ thực sự rẻ hơn giá niêm yết.
+   *
+   * 🔴 Đây là chỗ tính TIỀN THẬT, nên phải kiểm cả hai đầu thời gian: quên
+   * `startsAt` thì một chương trình hẹn giờ cho tuần sau đã được tính giá ngay
+   * hôm nay. Dùng chung `isDealLive` với chỗ hiển thị để hai nơi không lệch.
+   */
   private dealPrice(product: ProductDocument, listPrice: number): number {
     const deal = product.activeDeal;
-    if (!deal || new Date(deal.endsAt).getTime() <= Date.now())
-      return listPrice;
-    return deal.price < listPrice ? deal.price : listPrice;
+    if (!isDealLive(deal)) return listPrice;
+    return deal!.price < listPrice ? deal!.price : listPrice;
   }
 
   /** Các dòng hàng của đơn dưới dạng đầu vào cho giữ/hoàn kho. */
@@ -589,6 +604,19 @@ export class OrdersService {
     }
 
     await this.products.releaseStock(this.stockItemsOf([order]));
+
+    // 🔴 Đơn đã thu tiền mà bị huỷ thì kho được hoàn, đơn được đóng, nhưng
+    // TIỀN vẫn nằm ở sàn. Không ghi lại thì khoản nợ đó biến mất khỏi mọi báo
+    // cáo và người mua mất tiền trong im lặng.
+    if (order.paidAt && order.payment) {
+      await this.payments.flagRefundForOrder({
+        paymentId: order.payment,
+        orderCode: order.orderCode,
+        amount: order.total,
+        reason: reason?.trim() || `huỷ bởi ${by}`,
+      });
+    }
+
     return { ok: true };
   }
 
@@ -820,6 +848,25 @@ export class OrdersService {
   async updateStatus(user: UserDocument, id: string, next: OrderStatus) {
     const order = await this.findOwnedByShop(user, id);
 
+    /**
+     * 🔴 Người bán KHÔNG được tự chốt "đã giao thành công".
+     *
+     * `delivered` đặt `deliveredAt`, mà `deliveredAt` là mốc bắt đầu đếm ngày
+     * giữ tiền trước khi cho rút. Để người bán tự bấm nghĩa là họ tự mở khoá
+     * tiền của chính mình mà người mua không có tiếng nói nào — chỉ cần bấm
+     * bừa lúc hàng còn trên đường là lấy được tiền.
+     *
+     * Giờ chỉ có hai đường sang `delivered`: người mua xác nhận đã nhận, hoặc
+     * hệ thống tự xác nhận sau `AUTO_CONFIRM_DAYS` ngày.
+     */
+    if (next === 'delivered') {
+      throw new BadRequestException(
+        'Đơn sẽ tự chuyển sang "Đã giao" khi người mua xác nhận đã nhận hàng, ' +
+          `hoặc tự động sau ${AUTO_CONFIRM_DAYS} ngày kể từ lúc bàn giao vận chuyển. ` +
+          'Nếu giao không thành công, hãy dùng "Giao hàng thất bại".',
+      );
+    }
+
     if (!ALLOWED_TRANSITIONS[order.status].includes(next)) {
       throw new BadRequestException(
         `Không thể chuyển đơn từ "${STATUS_LABEL[order.status]}" sang "${STATUS_LABEL[next]}".`,
@@ -839,18 +886,123 @@ export class OrdersService {
       );
     }
 
+    return { ok: true, status: next };
+  }
+
+  /* --------------------------- Nhận hàng -------------------------------- */
+
+  /**
+   * Chốt một đơn là đã giao thành công.
+   *
+   * Dùng chung cho hai đường vào (người mua xác nhận, hệ thống tự xác nhận) để
+   * phần ghi sổ — mốc giao, cộng lượt bán — không có hai bản dễ trôi lệch.
+   *
+   * Giành quyền bằng `updateOne` có điều kiện `status: 'shipping'`: người mua
+   * bấm đúng lúc job tự động chạy thì chỉ một bên ghi được, bên kia không cộng
+   * lượt bán lần thứ hai.
+   */
+  private async markDelivered(
+    order: OrderDocument,
+    by: 'buyer' | 'system',
+  ): Promise<boolean> {
+    const now = new Date();
+    const res = await this.orderModel.updateOne(
+      { _id: order._id, status: 'shipping' },
+      {
+        $set: {
+          status: 'delivered',
+          // Mốc bắt đầu đếm ngày giữ tiền — phải là trường riêng chứ không
+          // lục lại trong timeline.
+          deliveredAt: now,
+        },
+        $push: {
+          timeline: {
+            status: 'delivered',
+            at: now,
+            by,
+            note: by === 'system' ? 'Tự động xác nhận' : undefined,
+          },
+        },
+      },
+    );
+    if (res.modifiedCount !== 1) return false;
+
     // Lượt bán chỉ cộng khi giao thành công — đơn huỷ không được tính.
-    if (next === 'delivered') {
-      // `deliveredAt` là gốc để tính thời gian giữ tiền trước khi cho rút, nên
-      // phải là trường riêng chứ không lục lại trong timeline.
-      await this.orderModel.updateOne(
-        { _id: order._id },
-        { $set: { deliveredAt: new Date() } },
+    await this.products.recordSold(this.stockItemsOf([order]));
+    return true;
+  }
+
+  /** Người mua xác nhận đã nhận được hàng. */
+  async confirmReceived(user: UserDocument, id: string) {
+    const order = await this.findOwnedByBuyer(user, id);
+
+    if (order.status === 'delivered') {
+      throw new BadRequestException('Đơn hàng này đã được xác nhận trước đó.');
+    }
+    if (order.status !== 'shipping') {
+      throw new BadRequestException(
+        'Chỉ xác nhận được khi đơn đang trên đường giao tới bạn.',
       );
-      await this.products.recordSold(this.stockItemsOf([order]));
     }
 
-    return { ok: true, status: next };
+    if (!(await this.markDelivered(order, 'buyer'))) {
+      throw new ConflictException(
+        'Trạng thái đơn vừa thay đổi. Vui lòng tải lại trang.',
+      );
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Tự xác nhận các đơn đã giao lâu mà người mua không bấm gì.
+   *
+   * Không có job này thì đơn kẹt ở "Đang giao" vĩnh viễn — người bán không bao
+   * giờ rút được tiền chỉ vì người mua quên bấm một nút, và đó là lỗi của hệ
+   * thống chứ không phải của họ.
+   */
+  async autoConfirmDelivered(now = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - AUTO_CONFIRM_DAYS * 86_400_000);
+    const stale = await this.orderModel
+      .find({ status: 'shipping', updatedAt: { $lte: cutoff } })
+      .limit(200);
+
+    let done = 0;
+    for (const order of stale) {
+      if (await this.markDelivered(order, 'system')) done++;
+    }
+    if (done) this.logger.log(`Tự xác nhận ${done} đơn đã giao quá hạn.`);
+    return done;
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleAutoConfirm() {
+    try {
+      await this.autoConfirmDelivered();
+    } catch (err: unknown) {
+      this.logger.error(`Tự xác nhận đơn thất bại: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Người bán đánh dấu giao hàng thất bại (khách không nhận, sai địa chỉ…).
+   *
+   * Trước đây `shipping` không có đường ra nào ngoài `delivered`: hàng bị trả
+   * về là đơn kẹt ở "Đang giao" mãi mãi, kho không bao giờ được hoàn và tiền
+   * của người mua cũng không ai trả lại.
+   */
+  async markDeliveryFailed(user: UserDocument, id: string, reason?: string) {
+    const order = await this.findOwnedByShop(user, id);
+    if (order.status !== 'shipping') {
+      throw new BadRequestException(
+        'Chỉ đánh dấu được khi đơn đang trên đường giao.',
+      );
+    }
+    return this.cancelOrder(
+      order,
+      'seller',
+      reason?.trim() || 'Giao hàng không thành công',
+      ['shipping'],
+    );
   }
 
   /**
@@ -1118,6 +1270,8 @@ export class OrdersService {
       addressLocked: o.status === 'confirmed' || !!o.paidAt,
       canRequestCancel:
         o.status === 'confirmed' && o.cancelRequest?.status !== 'pending',
+      /** Xác nhận đã nhận hàng — đây là thứ mở khoá tiền cho người bán. */
+      canConfirmReceived: o.status === 'shipping',
       cancelRequest: o.cancelRequest,
       ...(full
         ? { shippingAddress: o.shippingAddress, timeline: o.timeline }
@@ -1130,10 +1284,16 @@ export class OrdersService {
       ...this.baseOrder(o),
       // Người bán cần thông tin giao hàng ngay ở danh sách để chuẩn bị đóng gói.
       shippingAddress: o.shippingAddress,
+      // Bỏ `delivered`: người bán không tự chốt được nữa, phải chờ người mua
+      // xác nhận hoặc hệ thống tự xác nhận sau ít ngày. Bỏ `cancelled` vì huỷ
+      // đi đường riêng, không phải một "bước tiếp theo".
       nextStatus: ALLOWED_TRANSITIONS[o.status].filter(
-        (s) => s !== 'cancelled',
+        (s) => s !== 'cancelled' && s !== 'delivered',
       ),
       canCancel: SELLER_CANCELLABLE.includes(o.status),
+      /** Giao thất bại — đường ra duy nhất cho đơn đang giao mà hàng bị trả về. */
+      canMarkFailed: o.status === 'shipping',
+      autoConfirmDays: AUTO_CONFIRM_DAYS,
       // Người bán phải thấy hai thứ này ngay ở DANH SÁCH: địa chỉ sửa sau khi
       // đã in nhãn thì phải in lại, còn yêu cầu huỷ để treo là người mua chờ.
       addressUpdatedAt: o.addressUpdatedAt,

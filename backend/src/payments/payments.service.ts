@@ -55,7 +55,9 @@ export class PaymentsService {
 
     const bank = findBank(dto.bankBin);
     if (!bank) {
-      throw new BadRequestException('Ngân hàng không nằm trong danh sách hỗ trợ.');
+      throw new BadRequestException(
+        'Ngân hàng không nằm trong danh sách hỗ trợ.',
+      );
     }
 
     let result: Awaited<ReturnType<BankLookupProvider['lookup']>>;
@@ -132,7 +134,9 @@ export class PaymentsService {
         shop.contactName,
       ),
       verifiedAt: new Date(),
-      verifiedBy: this.lookupProvider.isReal ? this.lookupProvider.name : 'mock',
+      verifiedBy: this.lookupProvider.isReal
+        ? this.lookupProvider.name
+        : 'mock',
     };
     await shop.save();
 

@@ -139,7 +139,10 @@ export class MockPaymentGatewayProvider extends PaymentGatewayProvider {
     try {
       parsed = JSON.parse(rawBody) as Partial<GatewayWebhookEvent>;
     } catch {
-      return { valid: false, reason: 'Payload webhook không phải JSON hợp lệ.' };
+      return {
+        valid: false,
+        reason: 'Payload webhook không phải JSON hợp lệ.',
+      };
     }
 
     if (!parsed.code || !parsed.status || typeof parsed.amount !== 'number') {
@@ -162,7 +165,10 @@ export class MockPaymentGatewayProvider extends PaymentGatewayProvider {
     const code = providerRef.replace(/^MOCK-/, '');
     const session = this.sessions.get(code);
     if (!session) return Promise.resolve('failed');
-    if (session.status === 'pending' && session.expiresAt.getTime() < Date.now()) {
+    if (
+      session.status === 'pending' &&
+      session.expiresAt.getTime() < Date.now()
+    ) {
       return Promise.resolve('expired');
     }
     return Promise.resolve(session.status);
