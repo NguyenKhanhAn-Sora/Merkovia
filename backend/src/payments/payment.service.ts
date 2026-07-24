@@ -16,6 +16,7 @@ import {
 } from './gateway/payment-gateway.provider';
 import { config } from '../config/config';
 import { shortId } from '../common/text';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -38,6 +39,7 @@ export class PaymentService {
     private readonly paymentModel: Model<PaymentDocument>,
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
     private readonly gateway: PaymentGatewayProvider,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private newCode(): string {
@@ -336,10 +338,37 @@ export class PaymentService {
       this.logger.error(
         `CẦN HOÀN TIỀN — phiên ${payment.code}: thu ${event.amount}đ nhưng chỉ ${applied.modifiedCount}/${payment.orders.length} đơn còn nhận được.`,
       );
+      // Vẫn báo "đơn mới" cho các đơn ĐÃ chuyển tiếp thành công.
+      await this.notifyNewOrders(payment.orders);
       return { ok: true, warning: 'partial_orders' };
     }
 
+    // Đơn online chỉ "đến tay người bán" khi tiền đã về — báo đơn mới lúc này,
+    // không phải lúc tạo đơn (đơn chưa trả có thể bị bỏ, báo sớm là báo hụt).
+    await this.notifyNewOrders(payment.orders);
     return { ok: true };
+  }
+
+  /** Báo "đơn mới" cho người bán của các đơn vừa chuyển sang `pending`. */
+  private async notifyNewOrders(orderIds: Types.ObjectId[]): Promise<void> {
+    try {
+      const orders = await this.orderModel
+        .find({ _id: { $in: orderIds }, status: 'pending' })
+        .select('shop orderCode items');
+      for (const o of orders) {
+        const first = o.items[0]?.name ?? 'sản phẩm';
+        const more = o.items.length - 1;
+        await this.notifications.notifyShop(o.shop, {
+          type: 'new_order',
+          title: 'Bạn có đơn hàng mới',
+          body: `Đơn ${o.orderCode}: ${more > 0 ? `${first} và ${more} sản phẩm khác` : first}.`,
+          link: `/orders/${String(o._id)}`,
+          data: { orderId: String(o._id), orderCode: o.orderCode },
+        });
+      }
+    } catch (err: unknown) {
+      this.logger.warn(`Không báo được đơn mới (online): ${String(err)}`);
+    }
   }
 
   private async applyFailed(

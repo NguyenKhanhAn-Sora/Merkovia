@@ -24,6 +24,7 @@ import { Payout, PayoutSchema } from './schemas/payout.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { ShopsModule } from '../shops/shops.module';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * Thanh toán: tài khoản nhận tiền, thu tiền người mua, chi tiền người bán.
@@ -44,6 +45,7 @@ import { AuthModule } from '../auth/auth.module';
     ]),
     ShopsModule,
     AuthModule,
+    NotificationsModule, // báo "đơn mới" cho người bán khi thanh toán online xong
   ],
   controllers: [
     PaymentsController,

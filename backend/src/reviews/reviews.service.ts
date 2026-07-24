@@ -19,6 +19,7 @@ import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { Profile, ProfileDocument } from '../profiles/schemas/profile.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 const PAGE_SIZE = 10;
@@ -53,6 +54,7 @@ export class ReviewsService {
     private readonly profileModel: Model<ProfileDocument>,
     @InjectModel(Shop.name)
     private readonly shopModel: Model<ShopDocument>,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /* ------------------------------ Người mua ------------------------------ */
@@ -115,6 +117,14 @@ export class ReviewsService {
     // Điểm sao chỉ là con số hiển thị — hỏng ở đây không được làm mất đánh giá
     // vừa viết. Bản thân phép cộng lại tự chữa được ở lần đánh giá sau.
     await this.applyRatingDelta(item.product, deltaFor(dto.rating, +1));
+
+    await this.notifications.notifyShop(order.shop, {
+      type: 'review_received',
+      title: 'Sản phẩm có đánh giá mới',
+      body: `"${item.name}" vừa nhận đánh giá ${dto.rating}★.`,
+      link: `/reviews`,
+      data: { productId: String(item.product), rating: dto.rating },
+    });
 
     return { review: await this.publicReview(review) };
   }

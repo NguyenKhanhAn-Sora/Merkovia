@@ -40,6 +40,7 @@ import { RequestReturnDto } from './dto/return.dto';
 import { isDealLive } from '../products/deal';
 import { shortId } from '../common/text';
 import { config } from '../config/config';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -108,7 +109,15 @@ export class OrdersService {
     private readonly products: ProductsService,
     private readonly payments: PaymentService,
     private readonly shipping: ShippingProvider,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  /** Mô tả ngắn các món trong đơn cho nội dung thông báo. */
+  private itemsSummary(order: OrderDocument): string {
+    const first = order.items[0]?.name ?? 'sản phẩm';
+    const more = order.items.length - 1;
+    return more > 0 ? `${first} và ${more} sản phẩm khác` : first;
+  }
 
   /* ------------------------------ Tiện ích ------------------------------- */
 
@@ -294,6 +303,20 @@ export class OrdersService {
     }
 
     await this.rememberFirstAddress(user, dto.shippingAddress);
+
+    // COD vào thẳng `pending` nên báo đơn mới cho người bán ngay. Đơn online
+    // đợi thanh toán xong mới báo (trong `PaymentService.applyPaid`).
+    if (dto.paymentMethod === 'cod') {
+      for (const o of created) {
+        await this.notifications.notifyShop(o.shop, {
+          type: 'new_order',
+          title: 'Bạn có đơn hàng mới',
+          body: `Đơn ${o.orderCode}: ${this.itemsSummary(o)}.`,
+          link: `/orders/${String(o._id)}`,
+          data: { orderId: String(o._id), orderCode: o.orderCode },
+        });
+      }
+    }
 
     // Đơn online cần một phiên thanh toán cho CẢ nhóm — người mua trả một lần
     // cho toàn giỏ, không phải trả riêng từng gian hàng.
@@ -635,7 +658,19 @@ export class OrdersService {
           : 'Người bán đã xác nhận đơn, vui lòng liên hệ gian hàng để huỷ.',
       );
     }
-    return this.cancelOrder(order, 'buyer', reason, BUYER_CANCELLABLE);
+    const res = await this.cancelOrder(order, 'buyer', reason, BUYER_CANCELLABLE);
+    // Đơn `pending` (đã hiện với người bán) bị huỷ thì báo họ; `pending_payment`
+    // thì người bán còn chưa thấy đơn, không cần làm phiền.
+    if (order.status === 'pending') {
+      await this.notifications.notifyShop(order.shop, {
+        type: 'buyer_cancelled',
+        title: 'Người mua đã huỷ đơn',
+        body: `Đơn ${order.orderCode} vừa bị người mua huỷ.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+    }
+    return res;
   }
 
   /* --------------------------- Sửa địa chỉ ------------------------------ */
@@ -790,6 +825,13 @@ export class OrdersService {
       status: 'pending',
     };
     await order.save();
+    await this.notifications.notifyShop(order.shop, {
+      type: 'cancel_requested',
+      title: 'Người mua xin huỷ đơn',
+      body: `Đơn ${order.orderCode} có yêu cầu huỷ đang chờ bạn duyệt.`,
+      link: `/orders/${String(order._id)}`,
+      data: { orderId: String(order._id), orderCode: order.orderCode },
+    });
     return { ok: true, order: this.toBuyerOrder(order, true) };
   }
 
@@ -811,6 +853,13 @@ export class OrdersService {
       order.cancelRequest.sellerNote = note?.trim();
       order.markModified('cancelRequest');
       await order.save();
+      await this.notifications.notifyUser(order.buyer, 'buyer', {
+        type: 'cancel_rejected',
+        title: 'Yêu cầu huỷ bị từ chối',
+        body: `Người bán không đồng ý huỷ đơn ${order.orderCode}.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
       return { ok: true, order: this.toSellerOrder(order, true) };
     }
 
@@ -822,12 +871,20 @@ export class OrdersService {
     order.markModified('cancelRequest');
     await order.save();
 
-    return this.cancelOrder(
+    const res = await this.cancelOrder(
       order,
       'buyer', // người mua mới là bên muốn huỷ; người bán chỉ chấp thuận
       order.cancelRequest.reason || 'Người mua yêu cầu huỷ',
       SELLER_CANCELLABLE,
     );
+    await this.notifications.notifyUser(order.buyer, 'buyer', {
+      type: 'cancel_approved',
+      title: 'Đơn đã được huỷ',
+      body: `Người bán đã đồng ý huỷ đơn ${order.orderCode}.`,
+      link: `/orders/${String(order._id)}`,
+      data: { orderId: String(order._id), orderCode: order.orderCode },
+    });
+    return res;
   }
 
   /** Người bán từ chối / huỷ đơn (hết hàng, sai giá…). */
@@ -840,7 +897,15 @@ export class OrdersService {
           : 'Đơn đã bàn giao vận chuyển, không thể huỷ.',
       );
     }
-    return this.cancelOrder(order, 'seller', reason, SELLER_CANCELLABLE);
+    const res = await this.cancelOrder(order, 'seller', reason, SELLER_CANCELLABLE);
+    await this.notifications.notifyUser(order.buyer, 'buyer', {
+      type: 'order_cancelled_by_seller',
+      title: 'Đơn hàng đã bị huỷ',
+      body: `Người bán đã huỷ đơn ${order.orderCode}${reason?.trim() ? `: ${reason.trim()}` : '.'}`,
+      link: `/orders/${String(order._id)}`,
+      data: { orderId: String(order._id), orderCode: order.orderCode },
+    });
+    return res;
   }
 
   /**
@@ -891,6 +956,24 @@ export class OrdersService {
       );
     }
 
+    if (next === 'confirmed') {
+      await this.notifications.notifyUser(order.buyer, 'buyer', {
+        type: 'order_confirmed',
+        title: 'Đơn hàng đã được xác nhận',
+        body: `Người bán đã xác nhận đơn ${order.orderCode} và đang chuẩn bị hàng.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+    } else if (next === 'shipping') {
+      await this.notifications.notifyUser(order.buyer, 'buyer', {
+        type: 'order_shipping',
+        title: 'Đơn hàng đang được giao',
+        body: `Đơn ${order.orderCode} đã được bàn giao cho đơn vị vận chuyển.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+    }
+
     return { ok: true, status: next };
   }
 
@@ -934,6 +1017,26 @@ export class OrdersService {
 
     // Lượt bán chỉ cộng khi giao thành công — đơn huỷ không được tính.
     await this.products.recordSold(this.stockItemsOf([order]));
+
+    if (by === 'buyer') {
+      // Người mua xác nhận nhận hàng → tiền được mở khoá cho người bán.
+      await this.notifications.notifyShop(order.shop, {
+        type: 'order_received',
+        title: 'Người mua đã nhận hàng',
+        body: `Đơn ${order.orderCode} đã được xác nhận giao thành công.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+    } else {
+      // Hệ thống tự xác nhận sau nhiều ngày — báo người mua biết.
+      await this.notifications.notifyUser(order.buyer, 'buyer', {
+        type: 'order_delivered_auto',
+        title: 'Đơn hàng đã hoàn tất',
+        body: `Đơn ${order.orderCode} được tự động xác nhận đã giao. Bạn có thể đánh giá sản phẩm.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+    }
     return true;
   }
 
@@ -1002,12 +1105,20 @@ export class OrdersService {
         'Chỉ đánh dấu được khi đơn đang trên đường giao.',
       );
     }
-    return this.cancelOrder(
+    const res = await this.cancelOrder(
       order,
       'seller',
       reason?.trim() || 'Giao hàng không thành công',
       ['shipping'],
     );
+    await this.notifications.notifyUser(order.buyer, 'buyer', {
+      type: 'delivery_failed',
+      title: 'Giao hàng không thành công',
+      body: `Đơn ${order.orderCode} giao không thành công và đã được huỷ${order.paidAt ? ', tiền sẽ được hoàn lại' : ''}.`,
+      link: `/orders/${String(order._id)}`,
+      data: { orderId: String(order._id), orderCode: order.orderCode },
+    });
+    return res;
   }
 
   /* ---------------------------- Trả hàng -------------------------------- */
@@ -1068,6 +1179,13 @@ export class OrdersService {
     };
     order.markModified('returnRequest');
     await order.save();
+    await this.notifications.notifyShop(order.shop, {
+      type: 'return_requested',
+      title: 'Người mua yêu cầu trả hàng',
+      body: `Đơn ${order.orderCode} có yêu cầu trả hàng đang chờ bạn duyệt.`,
+      link: `/orders/${String(order._id)}`,
+      data: { orderId: String(order._id), orderCode: order.orderCode },
+    });
     return { ok: true, order: this.toBuyerOrder(order, true) };
   }
 
@@ -1097,6 +1215,13 @@ export class OrdersService {
       order.returnRequest.sellerNote = note?.trim();
       order.markModified('returnRequest');
       await order.save();
+      await this.notifications.notifyUser(order.buyer, 'buyer', {
+        type: 'return_rejected',
+        title: 'Yêu cầu trả hàng bị từ chối',
+        body: `Người bán không đồng ý trả hàng cho đơn ${order.orderCode}.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
       return { ok: true, order: this.toSellerOrder(order, true) };
     }
 
@@ -1152,6 +1277,14 @@ export class OrdersService {
         `Đơn COD ${order.orderCode} đã trả hàng — cần hoàn ${order.total}đ tiền mặt cho người mua.`,
       );
     }
+
+    await this.notifications.notifyUser(order.buyer, 'buyer', {
+      type: 'return_approved',
+      title: 'Yêu cầu trả hàng được chấp nhận',
+      body: `Người bán đồng ý trả hàng đơn ${order.orderCode}. Tiền ${order.total.toLocaleString('vi-VN')}đ sẽ được hoàn cho bạn.`,
+      link: `/orders/${String(order._id)}`,
+      data: { orderId: String(order._id), orderCode: order.orderCode },
+    });
 
     const fresh = await this.orderModel.findById(order._id);
     return { ok: true, order: this.toSellerOrder(fresh!, true) };

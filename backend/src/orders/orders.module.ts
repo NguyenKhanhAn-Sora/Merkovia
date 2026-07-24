@@ -9,6 +9,7 @@ import { AddressesModule } from '../addresses/addresses.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AuthModule } from '../auth/auth.module';
     PaymentsModule, // PaymentService: tạo phiên thanh toán khi checkout online
     ShippingModule, // ShippingProvider: tính cước vận chuyển
     AuthModule, // JwtAuthGuard
+    NotificationsModule, // báo tin đơn hàng cho hai phía
   ],
   controllers: [OrdersController, ShopOrdersController],
   providers: [OrdersService],

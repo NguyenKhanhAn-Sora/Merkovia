@@ -12,6 +12,7 @@ import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { PayoutProvider } from './gateway/payout.provider';
 import { config } from '../config/config';
 import { shortId } from '../common/text';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /** Số tiền tối thiểu mới cho rút — tránh phí chuyển khoản lớn hơn cả tiền rút. */
@@ -27,6 +28,7 @@ export class PayoutService {
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
     private readonly provider: PayoutProvider,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private newCode(): string {
@@ -290,6 +292,14 @@ export class PayoutService {
         this.logger.error(
           `Chi trả ${payout.code} thất bại: ${result.failureReason ?? 'không rõ'}`,
         );
+      } else if (result.status === 'paid') {
+        await this.notifications.notifyShop(payout.shop, {
+          type: 'payout_paid',
+          title: 'Đã chi trả vào tài khoản',
+          body: `Đợt rút ${payout.code} — ${payout.netAmount.toLocaleString('vi-VN')}đ đã được chuyển tới tài khoản của bạn.`,
+          link: `/finance`,
+          data: { payoutCode: payout.code, amount: payout.netAmount },
+        });
       }
     } catch (e: unknown) {
       // Không rõ lệnh đã đi hay chưa → GIỮ nguyên `processing` và giữ đơn.

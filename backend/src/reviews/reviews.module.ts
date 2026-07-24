@@ -12,6 +12,7 @@ import { ProductsModule } from '../products/products.module';
 import { ProfilesModule } from '../profiles/profiles.module';
 import { ShopsModule } from '../shops/shops.module';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * Đánh giá sản phẩm sau khi mua.
@@ -28,6 +29,7 @@ import { AuthModule } from '../auth/auth.module';
     ProfilesModule, // tên + ảnh người viết
     ShopsModule, // gian hàng của người bán
     AuthModule, // JwtAuthGuard
+    NotificationsModule, // báo đánh giá mới cho người bán
   ],
   controllers: [
     ProductReviewsController,

@@ -57,12 +57,14 @@ export function scopeFromRequest(req: Request): AppScope {
 }
 
 /**
- * Đọc một cookie httpOnly từ header thô.
- * Dự án không dùng `cookie-parser`, và guard chạy trước mọi middleware phân
- * tích nên phải tự tách. Gom về một chỗ thay vì chép ở ba nơi như trước.
+ * Tách một cookie từ chuỗi header `Cookie` thô.
+ * Dùng chung cho cả request HTTP lẫn handshake của socket.io (chỗ đó không có
+ * đối tượng `Request` của Express).
  */
-export function readCookie(req: Request, name: string): string | undefined {
-  const raw = req.headers.cookie;
+export function readCookieFromHeader(
+  raw: string | undefined,
+  name: string,
+): string | undefined {
   if (!raw) return undefined;
   for (const part of raw.split(';')) {
     const eq = part.indexOf('=');
@@ -72,6 +74,37 @@ export function readCookie(req: Request, name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Đọc một cookie httpOnly từ header thô.
+ * Dự án không dùng `cookie-parser`, và guard chạy trước mọi middleware phân
+ * tích nên phải tự tách. Gom về một chỗ thay vì chép ở ba nơi như trước.
+ */
+export function readCookie(req: Request, name: string): string | undefined {
+  return readCookieFromHeader(req.headers.cookie, name);
+}
+
+/**
+ * App của một handshake socket.io. Ưu tiên `auth.app` client tự khai (rõ ràng,
+ * sống sót qua proxy), lùi về `Origin` — cùng quy tắc `scopeFromRequest`.
+ */
+export function scopeFromSocket(handshake: {
+  auth?: Record<string, unknown>;
+  headers: Record<string, unknown>;
+}): AppScope {
+  const declared = handshake.auth?.app;
+  if (
+    typeof declared === 'string' &&
+    (APP_SCOPES as readonly string[]).includes(declared)
+  ) {
+    return declared as AppScope;
+  }
+  const origin = handshake.headers.origin;
+  if (typeof origin === 'string' && config.sellerUrl && origin === config.sellerUrl) {
+    return 'seller';
+  }
+  return 'buyer';
 }
 
 /** Access token của đúng app gửi request. */

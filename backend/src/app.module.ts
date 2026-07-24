@@ -21,6 +21,7 @@ import { ShippingModule } from './shipping/shipping.module';
 import { AccountModule } from './account/account.module';
 import { GeoModule } from './geo/geo.module';
 import { MediaModule } from './media/media.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { config } from './config/config';
 
 @Module({
@@ -45,6 +46,7 @@ import { config } from './config/config';
     AccountModule,
     GeoModule,
     MediaModule,
+    NotificationsModule,
     AuthModule,
   ],
   controllers: [AppController],
