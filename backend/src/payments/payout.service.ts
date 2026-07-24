@@ -39,9 +39,34 @@ export class PayoutService {
     return shop;
   }
 
-  /** Mốc thời gian mà đơn giao trước đó đã hết hạn giữ tiền. */
+  /**
+   * Mốc thời gian mà đơn giao trước đó đã hết hạn giữ tiền.
+   *
+   * 🔴 Giữ tới hết CỬA SỔ TRẢ HÀNG chứ không chỉ `payoutHoldDays`: trả tiền cho
+   * người bán trước khi người mua hết quyền trả hàng thì đến lúc duyệt trả
+   * hàng, tiền đã sang tay và không đòi lại được. Lấy mốc xa hơn trong hai cái.
+   */
   private holdCutoff(now = new Date()): Date {
-    return new Date(now.getTime() - config.payoutHoldDays * 86_400_000);
+    const holdDays = Math.max(config.payoutHoldDays, config.returnWindowDays);
+    return new Date(now.getTime() - holdDays * 86_400_000);
+  }
+
+  /**
+   * Điều kiện đơn đủ để chi trả cho người bán.
+   *
+   * Ngoài "đã giao, chưa gom, qua hạn giữ tiền" còn phải KHÔNG có yêu cầu trả
+   * hàng đang chờ: người mua gửi yêu cầu ở ngày cuối cửa sổ, tới khi qua hạn mà
+   * người bán chưa xử lý thì tiền vẫn phải bị giữ. Đơn đã trả hàng có
+   * `status: 'returned'` nên đã tự rớt khỏi điều kiện `status: 'delivered'`.
+   */
+  private payableFilter(shopId: Types.ObjectId): Record<string, unknown> {
+    return {
+      shop: shopId,
+      status: 'delivered',
+      payout: null,
+      deliveredAt: { $lte: this.holdCutoff() },
+      'returnRequest.status': { $ne: 'requested' },
+    };
   }
 
   /**
@@ -67,17 +92,17 @@ export class PayoutService {
     const cutoff = this.holdCutoff();
 
     const [available, holding, running, paidOut] = await Promise.all([
+      this.sumOrders(this.payableFilter(shop._id)),
+      // "Đang giữ": đã giao, chưa gom, NHƯNG chưa rút được — hoặc còn trong cửa
+      // sổ trả hàng, hoặc đang có yêu cầu trả hàng chờ xử lý.
       this.sumOrders({
         shop: shop._id,
         status: 'delivered',
         payout: null,
-        deliveredAt: { $lte: cutoff },
-      }),
-      this.sumOrders({
-        shop: shop._id,
-        status: 'delivered',
-        payout: null,
-        deliveredAt: { $gt: cutoff },
+        $or: [
+          { deliveredAt: { $gt: cutoff } },
+          { 'returnRequest.status': 'requested' },
+        ],
       }),
       this.sumOrders({
         shop: shop._id,
@@ -147,12 +172,15 @@ export class PayoutService {
     }
 
     const payoutId = new Types.ObjectId();
+    // Dựng bất biến để TS suy kiểu (mongoose 9 bỏ `FilterQuery`); giữ ĐỒNG BỘ
+    // với `payableFilter` — cùng một điều kiện "đơn đủ để chi trả".
     const claim = await this.orderModel.updateMany(
       {
         shop: shop._id,
         status: 'delivered',
         payout: null,
         deliveredAt: { $lte: this.holdCutoff() },
+        'returnRequest.status': { $ne: 'requested' },
       },
       { $set: { payout: payoutId } },
     );

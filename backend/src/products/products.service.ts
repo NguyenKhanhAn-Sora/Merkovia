@@ -568,6 +568,46 @@ export class ProductsService {
     }
   }
 
+  /**
+   * Trừ lượt bán khi đơn đã giao bị trả hàng — đối xứng với `recordSold`.
+   *
+   * Dùng pipeline `$max` để KHÔNG bao giờ xuống dưới 0: dữ liệu cũ có thể lệch,
+   * mà một lần trừ hụt sẽ để lại lượt bán âm hiển thị mãi trên thẻ sản phẩm.
+   * Cố tình KHÔNG cộng lại tồn kho: hàng trả về có thể đã hư/đã dùng, người bán
+   * tự kiểm rồi chỉnh kho — cộng khống tồn kho (bán thứ không có) tệ hơn hụt.
+   */
+  async releaseSold(items: StockItem[]): Promise<void> {
+    for (const item of items) {
+      await this.productModel
+        .updateOne(
+          { _id: item.productId },
+          [
+            {
+              $set: {
+                'stats.sold': {
+                  $max: [
+                    0,
+                    {
+                      $subtract: [
+                        { $ifNull: ['$stats.sold', 0] },
+                        item.quantity,
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          { updatePipeline: true },
+        )
+        .catch((e: unknown) =>
+          this.logger.warn(
+            `Không trừ được lượt bán cho ${item.productId}: ${String(e)}`,
+          ),
+        );
+    }
+  }
+
   /* -------------------------------- Xoá ---------------------------------- */
 
   /**

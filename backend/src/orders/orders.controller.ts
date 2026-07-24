@@ -23,6 +23,7 @@ import {
   RespondCancelDto,
   UpdateOrderStatusDto,
 } from './dto/query-orders.dto';
+import { RequestReturnDto, RespondReturnDto } from './dto/return.dto';
 import type { OrderStatus } from './schemas/order.schema';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UserDocument } from '../users/schemas/user.schema';
@@ -126,6 +127,18 @@ export class OrdersController {
   ) {
     return this.orders.requestCancel(user, id, dto.reason);
   }
+
+  /** Yêu cầu trả hàng sau khi đã nhận (cần người bán duyệt). */
+  @Post(':id/return-request')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  requestReturn(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: RequestReturnDto,
+  ) {
+    return this.orders.requestReturn(user, id, dto);
+  }
 }
 
 /**
@@ -198,5 +211,17 @@ export class ShopOrdersController {
     @Body() dto: RespondCancelDto,
   ) {
     return this.orders.respondCancelRequest(user, id, dto.approve, dto.note);
+  }
+
+  /** Duyệt hoặc từ chối yêu cầu trả hàng của người mua. */
+  @Post(':id/return-request')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  respondReturn(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: RespondReturnDto,
+  ) {
+    return this.orders.respondReturn(user, id, dto.approve, dto.note);
   }
 }

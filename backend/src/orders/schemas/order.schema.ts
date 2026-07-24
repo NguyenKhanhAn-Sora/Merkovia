@@ -13,6 +13,8 @@ export type OrderDocument = HydratedDocument<Order>;
  * - `shipping`: đã bàn giao cho vận chuyển.
  * - `delivered`: giao thành công — trạng thái kết thúc.
  * - `cancelled`: đã huỷ — trạng thái kết thúc, kho đã hoàn.
+ * - `returned`: người mua đã trả hàng (sau khi giao) và được duyệt — trạng
+ *   thái kết thúc, tiền phải hoàn cho người mua.
  */
 export const ORDER_STATUS = [
   'pending_payment',
@@ -21,6 +23,7 @@ export const ORDER_STATUS = [
   'shipping',
   'delivered',
   'cancelled',
+  'returned',
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUS)[number];
 
@@ -28,6 +31,7 @@ export type OrderStatus = (typeof ORDER_STATUS)[number];
 export const TERMINAL_STATUS: readonly OrderStatus[] = [
   'delivered',
   'cancelled',
+  'returned',
 ];
 
 /**
@@ -43,8 +47,11 @@ export const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> =
     // đường này thì đơn giao hỏng kẹt ở "Đang giao" vĩnh viễn: kho không được
     // hoàn, tiền không ai trả lại.
     shipping: ['delivered', 'cancelled'],
+    // `returned` KHÔNG nằm ở đây: trả hàng đi đường riêng có duyệt của người
+    // bán và điều kiện thời gian, không phải một bước người bán tự đẩy tới.
     delivered: [],
     cancelled: [],
+    returned: [],
   };
 
 export const PAYMENT_METHODS = ['cod', 'online'] as const;
@@ -192,6 +199,59 @@ export class CancelRequest {
 }
 const CancelRequestSchema = SchemaFactory.createForClass(CancelRequest);
 
+/** Lý do trả hàng — cố định để người bán lọc/thống kê, tránh gõ tự do lộn xộn. */
+export const RETURN_REASONS = [
+  'damaged', // hàng vỡ/hỏng khi nhận
+  'wrong_item', // giao sai sản phẩm/phân loại
+  'not_as_described', // khác mô tả/hình ảnh
+  'missing_parts', // thiếu phụ kiện/số lượng
+  'other',
+] as const;
+export type ReturnReason = (typeof RETURN_REASONS)[number];
+
+export const RETURN_REQUEST_STATUS = [
+  'requested',
+  'approved',
+  'rejected',
+] as const;
+export type ReturnRequestStatus = (typeof RETURN_REQUEST_STATUS)[number];
+
+/**
+ * Yêu cầu trả hàng của người mua SAU khi đã giao thành công.
+ *
+ * Khác `CancelRequest` (chỉ trước khi giao): trả hàng xảy ra khi hàng đã tới
+ * tay người mua rồi mới phát hiện vấn đề. Duyệt là chấp nhận trả và hoàn tiền —
+ * việc chuyển hàng ngược về người bán nằm ngoài hệ thống ở phiên bản này.
+ */
+@Schema({ _id: false })
+export class ReturnRequest {
+  @Prop({ type: String, enum: RETURN_REASONS, required: true })
+  reasonType: ReturnReason;
+
+  /** Mô tả thêm của người mua (bắt buộc để người bán có căn cứ xử lý). */
+  @Prop({ trim: true, required: true, maxlength: 500 })
+  reason: string;
+
+  @Prop({ required: true })
+  requestedAt: Date;
+
+  @Prop({
+    type: String,
+    enum: RETURN_REQUEST_STATUS,
+    default: 'requested',
+    required: true,
+  })
+  status: ReturnRequestStatus;
+
+  @Prop()
+  respondedAt?: Date;
+
+  /** Lời nhắn của người bán khi duyệt/từ chối. */
+  @Prop({ trim: true, maxlength: 300 })
+  sellerNote?: string;
+}
+const ReturnRequestSchema = SchemaFactory.createForClass(ReturnRequest);
+
 /** Một mốc trong lịch sử đơn — dựng nên dòng thời gian hiển thị hai phía. */
 @Schema({ _id: false })
 export class OrderEvent {
@@ -303,6 +363,27 @@ export class Order {
   /** Yêu cầu huỷ đơn đang chờ người bán duyệt (chỉ có sau khi đã xác nhận). */
   @Prop({ type: CancelRequestSchema })
   cancelRequest?: CancelRequest;
+
+  /** Yêu cầu trả hàng (chỉ có sau khi đã giao thành công). */
+  @Prop({ type: ReturnRequestSchema })
+  returnRequest?: ReturnRequest;
+
+  /** Mốc trả hàng được duyệt — đơn chuyển sang `returned`. */
+  @Prop()
+  returnedAt?: Date;
+
+  /**
+   * Người mua cần được hoàn `total` (đơn đã trả hàng hoặc huỷ sau khi đã trả
+   * tiền). Với đơn online còn có cờ trên `Payment`; cờ này phủ CẢ đơn COD —
+   * hàng COD đã giao nghĩa là người mua ĐÃ trả tiền mặt, trả hàng thì phải
+   * hoàn lại, mà COD không có bản ghi `Payment` nào để gắn cờ.
+   */
+  @Prop({ default: false, index: true })
+  buyerRefundPending: boolean;
+
+  /** Số tiền phải hoàn cho người mua (chụp lại lúc phát sinh nghĩa vụ hoàn). */
+  @Prop({ default: 0 })
+  buyerRefundAmount: number;
 
   /* ---------------------------- Thanh toán ------------------------------ */
   @Prop({ type: String, enum: PAYMENT_METHODS, required: true })

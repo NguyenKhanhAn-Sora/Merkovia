@@ -383,7 +383,24 @@ export class ReviewsService {
       .lean();
     const byUser = new Map(profiles.map((p) => [String(p.user), p]));
 
-    return reviews.map((r) => this.shape(r, byUser.get(String(r.buyer)), opts));
+    // Tên + logo shop để hiển thị bên cạnh phản hồi. Chỉ hỏi cho các đánh giá
+    // ĐÃ có phản hồi — không có phản hồi thì không cần tới shop nào.
+    const shopIds = [
+      ...new Set(
+        reviews.filter((r) => r.reply).map((r) => String(r.shop)),
+      ),
+    ].map((id) => new Types.ObjectId(id));
+    const shops = shopIds.length
+      ? await this.shopModel
+          .find({ _id: { $in: shopIds } })
+          .select('name logoUrl')
+          .lean()
+      : [];
+    const byShop = new Map(shops.map((s) => [String(s._id), s]));
+
+    return reviews.map((r) =>
+      this.shape(r, byUser.get(String(r.buyer)), opts, byShop.get(String(r.shop))),
+    );
   }
 
   private async publicReview(
@@ -398,6 +415,7 @@ export class ReviewsService {
     r: ReviewDocument,
     profile?: { fullName?: string; displayName?: string; avatarUrl?: string },
     opts: { forShop?: boolean } = {},
+    shop?: { name?: string; logoUrl?: string },
   ) {
     const realName = profile?.fullName || profile?.displayName || '';
     return {
@@ -412,6 +430,10 @@ export class ReviewsService {
         avatarUrl: r.anonymous ? undefined : profile?.avatarUrl,
       },
       reply: r.reply,
+      // Tên + logo shop để phần phản hồi có mặt người bán, không chỉ trơ chữ.
+      ...(r.reply
+        ? { replyBy: { name: shop?.name, logoUrl: shop?.logoUrl } }
+        : {}),
       repliedAt: r.repliedAt,
       edited: r.edited,
       createdAt: (r as unknown as { createdAt: Date }).createdAt,

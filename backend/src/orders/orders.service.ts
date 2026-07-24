@@ -36,8 +36,10 @@ import {
   UpdateShippingAddressDto,
 } from './dto/create-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
+import { RequestReturnDto } from './dto/return.dto';
 import { isDealLive } from '../products/deal';
 import { shortId } from '../common/text';
+import { config } from '../config/config';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -88,6 +90,9 @@ const BUYER_CANCELLABLE: readonly OrderStatus[] = [
 ];
 /** Người bán được từ chối đơn cho tới trước khi bàn giao vận chuyển. */
 const SELLER_CANCELLABLE: readonly OrderStatus[] = ['pending', 'confirmed'];
+
+/** Số ngày kể từ lúc giao thành công mà người mua còn được yêu cầu trả hàng. */
+const RETURN_WINDOW_DAYS = config.returnWindowDays;
 
 @Injectable()
 export class OrdersService {
@@ -1005,6 +1010,153 @@ export class OrdersService {
     );
   }
 
+  /* ---------------------------- Trả hàng -------------------------------- */
+
+  /** Hạn cuối được yêu cầu trả hàng, hoặc null nếu đơn chưa giao xong. */
+  private returnDeadline(order: OrderDocument): Date | null {
+    if (!order.deliveredAt) return null;
+    return new Date(
+      order.deliveredAt.getTime() + RETURN_WINDOW_DAYS * 86_400_000,
+    );
+  }
+
+  /** Người mua còn được mở yêu cầu trả hàng cho đơn này không. */
+  private canRequestReturn(order: OrderDocument, now = new Date()): boolean {
+    if (order.status !== 'delivered') return false;
+    const deadline = this.returnDeadline(order);
+    if (!deadline || now > deadline) return false;
+    // Đang có yêu cầu chờ xử lý thì không mở thêm; bị từ chối thì cho gửi lại
+    // (trong thời hạn) vì có thể bổ sung được bằng chứng.
+    return order.returnRequest?.status !== 'requested';
+  }
+
+  /**
+   * Người mua yêu cầu trả hàng sau khi đã nhận.
+   *
+   * Chỉ mở trong `RETURN_WINDOW_DAYS` ngày kể từ lúc giao — quá đó thì hàng đã
+   * dùng lâu, không còn căn cứ để trả. Việc DUYỆT thuộc về người bán; ở đây chỉ
+   * ghi nhận yêu cầu, chưa đụng tới kho hay tiền.
+   */
+  async requestReturn(user: UserDocument, id: string, dto: RequestReturnDto) {
+    const order = await this.findOwnedByBuyer(user, id);
+
+    if (order.status === 'returned') {
+      throw new BadRequestException('Đơn hàng này đã được trả.');
+    }
+    if (order.status !== 'delivered') {
+      throw new BadRequestException(
+        'Chỉ trả hàng được với đơn đã giao thành công.',
+      );
+    }
+    if (order.returnRequest?.status === 'requested') {
+      throw new BadRequestException(
+        'Bạn đã gửi yêu cầu trả hàng, vui lòng chờ người bán phản hồi.',
+      );
+    }
+    const deadline = this.returnDeadline(order);
+    if (!deadline || new Date() > deadline) {
+      throw new BadRequestException(
+        `Đã quá hạn trả hàng (${RETURN_WINDOW_DAYS} ngày kể từ khi nhận hàng).`,
+      );
+    }
+
+    order.returnRequest = {
+      reasonType: dto.reasonType,
+      reason: dto.reason.trim(),
+      requestedAt: new Date(),
+      status: 'requested',
+    };
+    order.markModified('returnRequest');
+    await order.save();
+    return { ok: true, order: this.toBuyerOrder(order, true) };
+  }
+
+  /**
+   * Người bán duyệt hoặc từ chối yêu cầu trả hàng.
+   *
+   * Duyệt = chấp nhận trả và HOÀN TIỀN cho người mua: đơn sang `returned`, trừ
+   * lượt bán, ghi nghĩa vụ hoàn tiền. KHÔNG tự cộng lại tồn kho — hàng trả về
+   * có thể đã hư/đã dùng, người bán kiểm rồi tự chỉnh kho.
+   */
+  async respondReturn(
+    user: UserDocument,
+    id: string,
+    approve: boolean,
+    note?: string,
+  ) {
+    const order = await this.findOwnedByShop(user, id);
+    if (order.returnRequest?.status !== 'requested') {
+      throw new BadRequestException(
+        'Đơn này không có yêu cầu trả hàng đang chờ.',
+      );
+    }
+
+    if (!approve) {
+      order.returnRequest.status = 'rejected';
+      order.returnRequest.respondedAt = new Date();
+      order.returnRequest.sellerNote = note?.trim();
+      order.markModified('returnRequest');
+      await order.save();
+      return { ok: true, order: this.toSellerOrder(order, true) };
+    }
+
+    // 🔴 Giành quyền bằng `updateOne` có điều kiện `status: 'delivered'`. Đơn
+    // chỉ chuyển sang `returned` được đúng một lần, kể cả khi có hai request
+    // duyệt song song — chỉ bên đổi được bản ghi mới trừ lượt bán và ghi nợ.
+    const now = new Date();
+    const res = await this.orderModel.updateOne(
+      { _id: order._id, status: 'delivered' },
+      {
+        $set: {
+          status: 'returned',
+          returnedAt: now,
+          'returnRequest.status': 'approved',
+          'returnRequest.respondedAt': now,
+          'returnRequest.sellerNote': note?.trim(),
+          buyerRefundPending: true,
+          buyerRefundAmount: order.total,
+        },
+        $push: {
+          timeline: {
+            status: 'returned',
+            at: now,
+            by: 'seller',
+            note: note?.trim() || 'Đồng ý trả hàng',
+          },
+        },
+      },
+    );
+    if (res.modifiedCount !== 1) {
+      throw new ConflictException(
+        'Trạng thái đơn vừa thay đổi ở nơi khác. Vui lòng tải lại trang.',
+      );
+    }
+
+    // Trừ lượt bán (đối xứng với lúc giao). Không chặn luồng nếu lỗi — đơn đã
+    // sang `returned`, thống kê lệch một chút sửa được, còn ném lỗi ở đây thì
+    // người bán tưởng duyệt hỏng và bấm lại.
+    await this.products.releaseSold(this.stockItemsOf([order]));
+
+    // Đơn online đã trả tiền: đẩy vào hàng đợi hoàn tiền của cổng. Đơn COD chỉ
+    // có cờ `buyerRefundPending` trên đơn (không có bản ghi Payment) — người
+    // vận hành đọc cờ đó để hoàn tiền mặt cho khách.
+    if (order.paidAt && order.payment) {
+      await this.payments.flagRefundForOrder({
+        paymentId: order.payment,
+        orderCode: order.orderCode,
+        amount: order.total,
+        reason: `Trả hàng (${order.returnRequest.reasonType})`,
+      });
+    } else {
+      this.logger.warn(
+        `Đơn COD ${order.orderCode} đã trả hàng — cần hoàn ${order.total}đ tiền mặt cho người mua.`,
+      );
+    }
+
+    const fresh = await this.orderModel.findById(order._id);
+    return { ok: true, order: this.toSellerOrder(fresh!, true) };
+  }
+
   /**
    * Bắt đầu / tiếp tục thanh toán — trả về link của cổng.
    *
@@ -1273,6 +1425,11 @@ export class OrdersService {
       /** Xác nhận đã nhận hàng — đây là thứ mở khoá tiền cho người bán. */
       canConfirmReceived: o.status === 'shipping',
       cancelRequest: o.cancelRequest,
+      /** Trả hàng — chỉ mở trong cửa sổ sau khi giao (xem `canRequestReturn`). */
+      canRequestReturn: this.canRequestReturn(o),
+      returnRequest: o.returnRequest,
+      returnWindowDays: RETURN_WINDOW_DAYS,
+      returnableUntil: this.returnDeadline(o)?.toISOString(),
       ...(full
         ? { shippingAddress: o.shippingAddress, timeline: o.timeline }
         : {}),
@@ -1298,6 +1455,10 @@ export class OrdersService {
       // đã in nhãn thì phải in lại, còn yêu cầu huỷ để treo là người mua chờ.
       addressUpdatedAt: o.addressUpdatedAt,
       cancelRequest: o.cancelRequest,
+      returnRequest: o.returnRequest,
+      /** Có yêu cầu trả hàng đang chờ người bán duyệt. */
+      canRespondReturn: o.returnRequest?.status === 'requested',
+      buyerRefundPending: o.buyerRefundPending,
       ...(full ? { timeline: o.timeline } : {}),
     };
   }
@@ -1355,6 +1516,7 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
   shipping: 'Đang giao',
   delivered: 'Đã giao',
   cancelled: 'Đã huỷ',
+  returned: 'Đã trả hàng',
 };
 
 /** Chặn ký tự đặc biệt của regex trong từ khoá tìm kiếm do người dùng nhập. */

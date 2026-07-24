@@ -155,11 +155,21 @@ export const config = {
   commissionRate: optionalNumber('COMMISSION_RATE', 0.05),
 
   /**
-   * Số ngày giữ tiền sau khi giao thành công rồi mới cho rút.
-   * Đây là cửa sổ để người mua khiếu nại/trả hàng — chi tiền ngay là mất khả
-   * năng hoàn tiền cho khách.
+   * Số ngày giữ tiền TỐI THIỂU sau khi giao thành công rồi mới cho rút.
+   * Chi tiền ngay là mất khả năng hoàn tiền cho khách.
+   *
+   * 🔴 KHÔNG phải là toàn bộ cửa sổ giữ tiền: nếu `returnWindowDays` dài hơn,
+   * tiền phải giữ tới hết cửa sổ trả hàng (xem `PayoutService.holdCutoff`).
+   * Rút trước khi hết hạn trả hàng thì đến lúc duyệt trả hàng, tiền đã sang tay
+   * người bán và không đòi lại được.
    */
   payoutHoldDays: optionalNumber('PAYOUT_HOLD_DAYS', 3),
+
+  /**
+   * Số ngày kể từ lúc giao thành công mà người mua còn được yêu cầu trả hàng.
+   * Cũng là cận dưới của thời gian giữ tiền người bán (xem chú thích trên).
+   */
+  returnWindowDays: optionalNumber('RETURN_WINDOW_DAYS', 7),
 
   // Lưu trữ media — Cloudflare R2 (S3-compatible). Optional để app vẫn boot
   // khi chưa cấu hình; endpoint upload sẽ báo lỗi rõ ràng nếu thiếu.
