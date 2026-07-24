@@ -8,7 +8,7 @@ import {
   NotifType,
 } from './schemas/notification.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
-import { NotificationsGateway } from './notifications.gateway';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /** Nội dung một thông báo, chưa gắn người nhận. */
@@ -30,7 +30,7 @@ export class NotificationsService {
     @InjectModel(Notification.name)
     private readonly model: Model<NotificationDocument>,
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
-    private readonly gateway: NotificationsGateway,
+    private readonly gateway: RealtimeGateway,
   ) {}
 
   /* ------------------------------- Tạo ---------------------------------- */

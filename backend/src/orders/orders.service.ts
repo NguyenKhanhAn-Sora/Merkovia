@@ -1544,7 +1544,8 @@ export class OrdersService {
   private toBuyerOrder(o: OrderDocument, full = false) {
     return {
       ...this.baseOrder(o),
-      shop: { name: o.shopName, slug: o.shopSlug },
+      // `id` để người mua bấm "Nhắn tin cho shop" ngay từ đơn hàng.
+      shop: { id: String(o.shop), name: o.shopName, slug: o.shopSlug },
       canCancel: BUYER_CANCELLABLE.includes(o.status),
       /**
        * Giao diện đọc ba cờ này thay vì tự suy từ trạng thái — quy tắc nằm ở
@@ -1574,6 +1575,8 @@ export class OrdersService {
       ...this.baseOrder(o),
       // Người bán cần thông tin giao hàng ngay ở danh sách để chuẩn bị đóng gói.
       shippingAddress: o.shippingAddress,
+      // `buyerId` để bấm "Nhắn tin cho khách" ngay từ đơn hàng.
+      buyerId: String(o.buyer),
       // Bỏ `delivered`: người bán không tự chốt được nữa, phải chờ người mua
       // xác nhận hoặc hệ thống tự xác nhận sau ít ngày. Bỏ `cancelled` vì huỷ
       // đi đường riêng, không phải một "bước tiếp theo".

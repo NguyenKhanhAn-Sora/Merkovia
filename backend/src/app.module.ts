@@ -22,6 +22,8 @@ import { AccountModule } from './account/account.module';
 import { GeoModule } from './geo/geo.module';
 import { MediaModule } from './media/media.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { RealtimeModule } from './realtime/realtime.module';
+import { ChatModule } from './chat/chat.module';
 import { config } from './config/config';
 
 @Module({
@@ -46,7 +48,9 @@ import { config } from './config/config';
     AccountModule,
     GeoModule,
     MediaModule,
+    RealtimeModule,
     NotificationsModule,
+    ChatModule,
     AuthModule,
   ],
   controllers: [AppController],

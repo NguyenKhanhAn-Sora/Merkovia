@@ -5,10 +5,10 @@ import {
   NotificationSchema,
 } from './schemas/notification.schema';
 import { NotificationsService } from './notifications.service';
-import { NotificationsGateway } from './notifications.gateway';
 import { NotificationsController } from './notifications.controller';
 import { ShopsModule } from '../shops/shops.module';
 import { AuthModule } from '../auth/auth.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -16,10 +16,11 @@ import { AuthModule } from '../auth/auth.module';
       { name: Notification.name, schema: NotificationSchema },
     ]),
     ShopsModule, // Shop model: tra chủ shop khi gửi thông báo cho người bán
-    AuthModule, // JwtAuthGuard + AccountService (xác thực socket)
+    AuthModule, // JwtAuthGuard
+    RealtimeModule, // cổng socket dùng chung với chat
   ],
   controllers: [NotificationsController],
-  providers: [NotificationsService, NotificationsGateway],
+  providers: [NotificationsService],
   // Các module nghiệp vụ (orders, reviews, payments) gọi service này để phát
   // thông báo tại đúng thời điểm.
   exports: [NotificationsService],

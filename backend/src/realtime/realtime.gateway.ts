@@ -20,12 +20,11 @@ function roomOf(userId: string, audience: AppScope): string {
 }
 
 /**
- * Cổng real-time đẩy thông báo (và sau này là tin nhắn) tới client.
+ * Cổng socket DUY NHẤT của hệ thống — dùng chung cho thông báo và tin nhắn.
  *
- * 🔴 Socket chỉ là kênh ĐẨY, KHÔNG phải nguồn sự thật: danh sách/đánh dấu/xoá
- * đều đi qua REST. Mất socket thì client vẫn dùng được đầy đủ qua REST, chỉ
- * không nhận tức thời. Nhờ vậy lỗi ở tầng socket không bao giờ làm hỏng nghiệp
- * vụ.
+ * 🔴 Socket chỉ là kênh ĐẨY, KHÔNG phải nguồn sự thật: mọi dữ liệu đều đọc/ghi
+ * qua REST. Mất socket thì client vẫn dùng được đầy đủ, chỉ không nhận tức
+ * thời. Nhờ vậy lỗi ở tầng socket không bao giờ làm hỏng nghiệp vụ.
  *
  * Xác thực bằng chính cookie httpOnly của phiên (đọc theo app như REST), nên
  * không phát sinh cơ chế đăng nhập thứ hai để lệch nhau.
@@ -33,8 +32,8 @@ function roomOf(userId: string, audience: AppScope): string {
 @WebSocketGateway({
   cors: { origin: config.corsOrigin, credentials: true },
 })
-export class NotificationsGateway implements OnGatewayConnection {
-  private readonly logger = new Logger(NotificationsGateway.name);
+export class RealtimeGateway implements OnGatewayConnection {
+  private readonly logger = new Logger(RealtimeGateway.name);
 
   @WebSocketServer()
   server: Server;
@@ -56,7 +55,7 @@ export class NotificationsGateway implements OnGatewayConnection {
       await client.join(roomOf(String(user._id), scope));
     } catch {
       // Chưa đăng nhập hoặc token hỏng: ngắt lịch sự. Client tự kết nối lại sau
-      // khi gia hạn phiên; trong lúc đó vẫn xem thông báo qua REST bình thường.
+      // khi gia hạn phiên; trong lúc đó vẫn dùng REST bình thường.
       client.emit('unauthorized');
       client.disconnect(true);
     }

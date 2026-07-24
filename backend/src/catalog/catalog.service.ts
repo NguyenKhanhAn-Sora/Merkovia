@@ -248,6 +248,9 @@ export class CatalogService {
 
   private publicShop(shop: ShopDocument) {
     return {
+      // Id cần cho nút "Nhắn tin" (mở hội thoại theo gian hàng). Không nhạy
+      // cảm: đây là gian hàng công khai, ai xem trang cũng thấy được.
+      id: String(shop._id),
       name: shop.name,
       slug: shop.slug,
       logoUrl: shop.logoUrl,
