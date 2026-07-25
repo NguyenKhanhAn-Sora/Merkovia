@@ -24,6 +24,7 @@ import { MediaModule } from './media/media.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { ChatModule } from './chat/chat.module';
+import { CartModule } from './cart/cart.module';
 import { config } from './config/config';
 
 @Module({
@@ -51,6 +52,7 @@ import { config } from './config/config';
     RealtimeModule,
     NotificationsModule,
     ChatModule,
+    CartModule,
     AuthModule,
   ],
   controllers: [AppController],
