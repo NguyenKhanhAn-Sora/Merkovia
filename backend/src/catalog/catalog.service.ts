@@ -10,6 +10,7 @@ import {
 import { BrowseProductsDto } from './dto/browse-products.dto';
 import { isDealLive } from '../products/deal';
 import { buildSearchText } from '../common/text';
+import { SemanticSearchService } from '../search/semantic-search.service';
 
 /** Sắp xếp cho người mua → điều kiện sort của Mongo. */
 const SORTS: Record<string, Record<string, 1 | -1>> = {
@@ -37,6 +38,7 @@ export class CatalogService {
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
     @InjectModel(Category.name)
     private readonly categoryModel: Model<CategoryDocument>,
+    private readonly semantic: SemanticSearchService,
   ) {}
 
   /** Điều kiện lọc sản phẩm được phép hiển thị công khai. */
@@ -108,18 +110,61 @@ export class CatalogService {
       };
     }
 
+    // Thứ tự theo độ liên quan ngữ nghĩa (chỉ dùng khi tìm kiếm bằng vector).
+    let relevanceIds: Types.ObjectId[] | null = null;
     if (query.q?.trim()) {
-      // Bỏ dấu từ khoá rồi khớp trên searchText (cũng đã bỏ dấu).
+      // Ưu tiên tìm kiếm NGỮ NGHĨA; `null` = tắt/lỗi, `[]` = không món nào hợp.
+      const ranked = await this.semantic.rankIds(query.q).catch(() => null);
+      // Khớp TỪ KHOÁ: bỏ dấu rồi so trên searchText (cũng đã bỏ dấu), AND các từ.
       const words = buildSearchText([query.q]).split(' ').filter(Boolean);
-      if (words.length) {
-        match.$and = words.map((w) => ({
-          searchText: { $regex: w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') },
-        }));
+      const keywordAnd = words.length
+        ? words.map((w) => ({
+            searchText: { $regex: w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') },
+          }))
+        : null;
+
+      if (ranked && ranked.length) {
+        relevanceIds = ranked;
+        // 🔴 HỢP tập ngữ nghĩa VỚI khớp từ khoá: hàng CHƯA có embedding (Gemini
+        // lỗi/quota, vector sinh trễ) hay khớp đúng tên vẫn hiện — không "biến
+        // mất" khỏi tìm kiếm. Vẫn lọc được ngành lạc đề vì truy vấn mô tả hiếm
+        // khi khớp ĐỦ mọi từ khoá nên không kéo rác về.
+        match.$or = [
+          { _id: { $in: ranked } },
+          ...(keywordAnd ? [{ $and: keywordAnd }] : []),
+        ];
+      } else if (keywordAnd) {
+        // Ngữ nghĩa tắt / không ra kết quả → thuần từ khoá như cũ.
+        match.$and = keywordAnd;
       }
     }
 
+    // Khi tìm bằng ngữ nghĩa mà người dùng chưa chọn cách sắp xếp riêng, xếp theo
+    // ĐỘ LIÊN QUAN (vị trí trong danh sách đã xếp hạng). Chọn giá/đánh giá... thì
+    // tôn trọng lựa chọn đó, chỉ giới hạn trong tập ứng viên liên quan.
+    const byRelevance =
+      relevanceIds !== null &&
+      (query.sort === undefined || query.sort === 'newest');
+
     const pipeline: PipelineStage[] = [
       { $match: match },
+      ...(byRelevance
+        ? [
+            {
+              $addFields: {
+                // Vị trí trong danh sách xếp hạng ngữ nghĩa; -1 = chỉ khớp từ
+                // khoá (ngoài tập ngữ nghĩa) → đẩy xuống CUỐI, không cho nhảy lên
+                // đầu vì `indexOfArray` trả -1.
+                _rel: {
+                  $let: {
+                    vars: { i: { $indexOfArray: [relevanceIds, '$_id'] } },
+                    in: { $cond: [{ $lt: ['$$i', 0] }, 1_000_000, '$$i'] },
+                  },
+                },
+              },
+            } as PipelineStage,
+          ]
+        : []),
       // Nối sang shop để loại hàng của gian hàng bị đình chỉ / đang tạm nghỉ.
       {
         $lookup: {
@@ -136,7 +181,13 @@ export class CatalogService {
           'shopDoc.vacationMode': { $ne: true },
         },
       },
-      { $sort: SORTS[query.sort ?? 'newest'] },
+      // `_rel` càng nhỏ càng liên quan; đuôi chỉ-khớp-từ-khoá (cùng _rel) xếp
+      // theo mới nhất.
+      {
+        $sort: byRelevance
+          ? { _rel: 1, publishedAt: -1, createdAt: -1 }
+          : SORTS[query.sort ?? 'newest'],
+      },
       {
         $facet: {
           items: [

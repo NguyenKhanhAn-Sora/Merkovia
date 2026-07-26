@@ -131,6 +131,29 @@ export const config = {
     ),
   },
 
+  /**
+   * Gemini — sinh vector embedding cho TÌM KIẾM NGỮ NGHĨA.
+   *
+   * Chọn Gemini vì `text-embedding-004` có gói miễn phí rộng và tiếng Việt tốt.
+   * ĐỂ TRỐNG `apiKey` thì tính năng TỰ TẮT: sản phẩm không được sinh vector và
+   * tìm kiếm tự lui về khớp từ khoá (regex trên `searchText`) như cũ — không lỗi.
+   * Tuyệt đối không bịa vector: thiếu khoá thì thà tìm theo từ khoá còn hơn xếp
+   * hạng theo dữ liệu giả.
+   */
+  gemini: {
+    apiKey: optional('GEMINI_API_KEY', ''),
+    /**
+     * `gemini-embedding-001` là model embedding GA hiện tại (Google đã ngừng
+     * `text-embedding-004`). Đổi model chỉ cần đổi env; nhớ backfill lại vì số
+     * chiều có thể khác — vector khác chiều sẽ bị bỏ qua khi tính cosine.
+     */
+    embedModel: optional('GEMINI_EMBED_MODEL', 'gemini-embedding-001'),
+    baseUrl: optional(
+      'GEMINI_BASE_URL',
+      'https://generativelanguage.googleapis.com/v1beta',
+    ),
+  },
+
   // URL app người mua — cổng thanh toán dùng để đưa khách quay về sau khi trả.
   frontendUrl: optional('FRONTEND_URL', 'http://localhost:3000'),
 

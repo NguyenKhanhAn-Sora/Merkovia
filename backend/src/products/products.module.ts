@@ -9,6 +9,7 @@ import { ShopsModule } from '../shops/shops.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { AuthModule } from '../auth/auth.module';
 import { MediaModule } from '../media/media.module';
+import { SearchModule } from '../search/search.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { MediaModule } from '../media/media.module';
     CategoriesModule, // để kiểm tra danh mục + lấy đường dẫn tổ tiên
     AuthModule, // JwtAuthGuard
     MediaModule, // xoá ảnh R2 khi dọn thùng rác
+    SearchModule, // sinh vector embedding khi tạo/sửa sản phẩm
   ],
   controllers: [ProductsController, PromotionsController],
   providers: [ProductsService, PromotionsService],

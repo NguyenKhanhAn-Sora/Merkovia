@@ -22,6 +22,8 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { isDealLive } from './deal';
 import { buildSearchText, shortId, slugify } from '../common/text';
+import { EmbeddingService } from '../search/embedding.service';
+import { buildEmbedText } from '../search/embed-text';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -55,6 +57,7 @@ export class ProductsService {
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
     private readonly categories: CategoriesService,
     private readonly media: MediaService,
+    private readonly embedding: EmbeddingService,
   ) {}
 
   private readonly logger = new Logger(ProductsService.name);
@@ -191,6 +194,18 @@ export class ProductsService {
     ]);
   }
 
+  /**
+   * Lên lịch sinh vector embedding cho tìm kiếm ngữ nghĩa — "bắn rồi quên":
+   * KHÔNG chờ, KHÔNG để lỗi mạng làm hỏng việc lưu sản phẩm. Thiếu khoá Gemini
+   * thì `embedAndStore` tự bỏ qua. Chỉ gọi khi phần CHỮ đổi để khỏi tốn API.
+   */
+  private scheduleEmbedding(product: ProductDocument, categoryName?: string) {
+    const text = buildEmbedText(product, categoryName);
+    void this.embedding
+      .embedAndStore(product._id as Types.ObjectId, text, product.name)
+      .catch(() => undefined);
+  }
+
   /* ------------------------------- Tạo mới ------------------------------- */
 
   async create(user: UserDocument, dto: CreateProductDto) {
@@ -225,6 +240,7 @@ export class ProductsService {
     this.syncDerived(product);
     this.syncSearchText(product, category.name);
     await product.save();
+    this.scheduleEmbedding(product, category.name);
     return { ok: true, id: String(product._id) };
   }
 
@@ -413,8 +429,14 @@ export class ProductsService {
     }
 
     this.syncDerived(product);
+    // So chuỗi tìm kiếm trước/sau: chỉ khi phần CHỮ đổi mới cần nhúng lại vector
+    // (đổi giá/kho/ảnh không ảnh hưởng ngữ nghĩa nên khỏi tốn lượt gọi Gemini).
+    const prevSearch = product.searchText;
     this.syncSearchText(product, categoryName);
     await product.save();
+    if (product.searchText !== prevSearch) {
+      this.scheduleEmbedding(product, categoryName);
+    }
     return { ok: true };
   }
 
