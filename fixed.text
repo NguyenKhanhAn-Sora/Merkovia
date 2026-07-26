@@ -8,3 +8,8 @@ ta phải giải quyết thế nào, kiểu như trung gian là người lấy h
 và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, có cần làm 1 app riêng không?
 - lý do huỷ hàng thì thêm 1 vài option có sẵn để user chọn và 1 option other để user tự nhập lý do
 - sửa lỗi trang buyer thì login bằng google bình thường, còn trang seller thì login bằng google thì bị chặn
+- thêm chức năng mỗi loại sản phẩm sẽ có hình ảnh tương ứng, trong trang 
+detail sản phẩm thì mỗi phân loại sẽ đính kèm hình ảnh tương ứng và khi 
+user chọn phân loại nào thì hình ảnh hiển thị sẽ tự động đổi tương ứng, 
+nếu seller không đính kèm ảnh chính vào thì sẽ lấy hình ảnh của từng phân 
+loại làm ảnh hiển thị
