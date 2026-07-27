@@ -166,6 +166,17 @@ export const CANCEL_REQUEST_STATUS = [
 ] as const;
 export type CancelRequestStatus = (typeof CANCEL_REQUEST_STATUS)[number];
 
+/** Lý do huỷ đơn — cố định để người bán lọc/thống kê, tránh gõ tự do lộn xộn. */
+export const CANCEL_REASONS = [
+  'changed_mind', // đổi ý, không muốn mua nữa
+  'ordered_wrong', // đặt nhầm sản phẩm/phân loại/số lượng
+  'found_better_price', // tìm được nơi bán rẻ hơn
+  'update_info', // muốn đổi địa chỉ/thanh toán
+  'delivery_too_long', // thời gian giao dự kiến quá lâu
+  'other',
+] as const;
+export type CancelReason = (typeof CANCEL_REASONS)[number];
+
 /**
  * Yêu cầu huỷ đơn của người mua SAU khi người bán đã xác nhận.
  *
@@ -176,6 +187,10 @@ export type CancelRequestStatus = (typeof CANCEL_REQUEST_STATUS)[number];
  */
 @Schema({ _id: false })
 export class CancelRequest {
+  /** Nhóm lý do có sẵn; `other` thì người mua tự nhập ở `reason`. */
+  @Prop({ type: String, enum: CANCEL_REASONS })
+  reasonType?: CancelReason;
+
   @Prop({ trim: true, maxlength: 300 })
   reason?: string;
 
@@ -228,9 +243,9 @@ export class ReturnRequest {
   @Prop({ type: String, enum: RETURN_REASONS, required: true })
   reasonType: ReturnReason;
 
-  /** Mô tả thêm của người mua (bắt buộc để người bán có căn cứ xử lý). */
-  @Prop({ trim: true, required: true, maxlength: 500 })
-  reason: string;
+  /** Mô tả của người mua — bắt buộc khi lý do là "other", còn lại tuỳ chọn. */
+  @Prop({ trim: true, maxlength: 500 })
+  reason?: string;
 
   @Prop({ required: true })
   requestedAt: Date;
@@ -328,6 +343,10 @@ export class Order {
 
   @Prop({ type: String, enum: CANCELLED_BY })
   cancelledBy?: CancelledBy;
+
+  /** Nhóm lý do huỷ (người mua chọn); `other` thì nội dung tự nhập ở `cancelReason`. */
+  @Prop({ type: String, enum: CANCEL_REASONS })
+  cancelReasonType?: CancelReason;
 
   @Prop({ trim: true, maxlength: 300 })
   cancelReason?: string;

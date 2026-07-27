@@ -8,8 +8,10 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
+  ValidateIf,
 } from 'class-validator';
-import { ORDER_STATUS } from '../schemas/order.schema';
+import { CANCEL_REASONS, ORDER_STATUS } from '../schemas/order.schema';
 
 /** Bộ lọc danh sách đơn — dùng chung cho cả người mua và người bán. */
 export class QueryOrdersDto {
@@ -44,9 +46,19 @@ export class UpdateOrderStatusDto {
 }
 
 export class CancelOrderDto {
+  /** Nhóm lý do có sẵn. Không gửi (huỷ bởi người bán/hệ thống) thì bỏ qua. */
   @IsOptional()
-  @IsString()
-  @MaxLength(300)
+  @IsIn(CANCEL_REASONS, { message: 'Vui lòng chọn lý do huỷ.' })
+  reasonType?: (typeof CANCEL_REASONS)[number];
+
+  /**
+   * Nội dung tự nhập. BẮT BUỘC khi chọn "Khác" (other) — chọn nhãn khác thì bỏ
+   * qua (ô nhập phía client đã chặn tối đa 300 ký tự cho phần ghi chú thêm).
+   */
+  @ValidateIf((o: CancelOrderDto) => o.reasonType === 'other')
+  @IsString({ message: 'Vui lòng nhập lý do huỷ.' })
+  @MinLength(5, { message: 'Vui lòng mô tả rõ hơn (ít nhất 5 ký tự).' })
+  @MaxLength(300, { message: 'Lý do tối đa 300 ký tự.' })
   reason?: string;
 }
 

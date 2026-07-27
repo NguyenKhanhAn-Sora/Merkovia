@@ -1,4 +1,12 @@
-import { IsBoolean, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 import { RETURN_REASONS } from '../schemas/order.schema';
 
 /** Người mua yêu cầu trả hàng. */
@@ -7,13 +15,14 @@ export class RequestReturnDto {
   reasonType: (typeof RETURN_REASONS)[number];
 
   /**
-   * Mô tả bắt buộc: yêu cầu trả hàng đụng tới tiền của cả hai bên, người bán
-   * cần căn cứ cụ thể để duyệt chứ không chỉ một nhãn lý do chung chung.
+   * Nội dung tự nhập. BẮT BUỘC khi chọn "Khác" (other) — chọn nhãn có sẵn thì
+   * đây là mô tả thêm không bắt buộc (ô nhập client đã chặn tối đa 500 ký tự).
    */
-  @IsString()
+  @ValidateIf((o: RequestReturnDto) => o.reasonType === 'other')
+  @IsString({ message: 'Vui lòng nhập lý do trả hàng.' })
   @MinLength(10, { message: 'Vui lòng mô tả rõ hơn (ít nhất 10 ký tự).' })
   @MaxLength(500, { message: 'Mô tả tối đa 500 ký tự.' })
-  reason: string;
+  reason?: string;
 }
 
 /** Người bán trả lời yêu cầu trả hàng của người mua. */

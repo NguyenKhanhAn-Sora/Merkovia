@@ -90,7 +90,7 @@ export class OrdersController {
     @Param('id') id: string,
     @Body() dto: CancelOrderDto,
   ) {
-    return this.orders.cancelByBuyer(user, id, dto.reason);
+    return this.orders.cancelByBuyer(user, id, dto.reasonType, dto.reason);
   }
 
   /**
@@ -125,7 +125,7 @@ export class OrdersController {
     @Param('id') id: string,
     @Body() dto: CancelOrderDto,
   ) {
-    return this.orders.requestCancel(user, id, dto.reason);
+    return this.orders.requestCancel(user, id, dto.reasonType, dto.reason);
   }
 
   /** Yêu cầu trả hàng sau khi đã nhận (cần người bán duyệt). */

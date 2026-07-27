@@ -11,6 +11,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
   ALLOWED_TRANSITIONS,
+  CancelReason,
   Order,
   OrderDocument,
   OrderItem,
@@ -601,6 +602,7 @@ export class OrdersService {
     by: 'buyer' | 'seller' | 'system',
     reason?: string,
     allowedFrom: readonly OrderStatus[] = [],
+    reasonType?: CancelReason,
   ) {
     const res = await this.orderModel.updateOne(
       {
@@ -613,6 +615,9 @@ export class OrdersService {
           status: 'cancelled',
           stockReleased: true,
           cancelledBy: by,
+          // `undefined` bị mongoose loại khỏi $set nên huỷ bởi seller/hệ thống
+          // không ghi nhãn — đúng ý, chỉ người mua mới chọn nhãn.
+          cancelReasonType: reasonType,
           cancelReason: reason,
         },
         $push: {
@@ -649,7 +654,12 @@ export class OrdersService {
   }
 
   /** Người mua tự huỷ đơn khi người bán chưa xác nhận. */
-  async cancelByBuyer(user: UserDocument, id: string, reason?: string) {
+  async cancelByBuyer(
+    user: UserDocument,
+    id: string,
+    reasonType?: CancelReason,
+    reason?: string,
+  ) {
     const order = await this.findOwnedByBuyer(user, id);
     if (!BUYER_CANCELLABLE.includes(order.status)) {
       throw new BadRequestException(
@@ -658,7 +668,13 @@ export class OrdersService {
           : 'Người bán đã xác nhận đơn, vui lòng liên hệ gian hàng để huỷ.',
       );
     }
-    const res = await this.cancelOrder(order, 'buyer', reason, BUYER_CANCELLABLE);
+    const res = await this.cancelOrder(
+      order,
+      'buyer',
+      reason,
+      BUYER_CANCELLABLE,
+      reasonType,
+    );
     // Đơn `pending` (đã hiện với người bán) bị huỷ thì báo họ; `pending_payment`
     // thì người bán còn chưa thấy đơn, không cần làm phiền.
     if (order.status === 'pending') {
@@ -798,7 +814,12 @@ export class OrdersService {
    * — người mua đổi ý hay chuyển nhà mà không có đường ra thì chỉ còn cách từ
    * chối nhận hàng, tệ hơn cho cả hai bên.
    */
-  async requestCancel(user: UserDocument, id: string, reason?: string) {
+  async requestCancel(
+    user: UserDocument,
+    id: string,
+    reasonType?: CancelReason,
+    reason?: string,
+  ) {
     const order = await this.findOwnedByBuyer(user, id);
 
     if (BUYER_CANCELLABLE.includes(order.status)) {
@@ -820,6 +841,7 @@ export class OrdersService {
     }
 
     order.cancelRequest = {
+      reasonType,
       reason: reason?.trim(),
       requestedAt: new Date(),
       status: 'pending',
@@ -1173,7 +1195,7 @@ export class OrdersService {
 
     order.returnRequest = {
       reasonType: dto.reasonType,
-      reason: dto.reason.trim(),
+      reason: dto.reason?.trim(),
       requestedAt: new Date(),
       status: 'requested',
     };
@@ -1536,6 +1558,7 @@ export class OrdersService {
       paidAt: o.paidAt,
       note: o.note,
       cancelledBy: o.cancelledBy,
+      cancelReasonType: o.cancelReasonType,
       cancelReason: o.cancelReason,
       createdAt: (o as unknown as { createdAt: Date }).createdAt,
     };
