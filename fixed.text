@@ -1,22 +1,31 @@
-- sửa lại chỗ gửi mã otp cảu tất cả các trang có liên quan đến OTP, thời gian
-đếm ngược phải bị làm mờ đi nếu còn đang trong thời gian 60s của trang 
-login và signup. Và tôi muốn biết là khi user vừa gửi otp sau đó quay về 
-trang trước đó aroi62 nhập lại email/sdt vừa gửi otp thì button gửi otp có 
-được gửi lại ngay lập tức không hay vẫn tính là còn đang trong thời gian chờ 
-thì hợp lý?
-đợi làm xong login signup và database thì sửa lại cho chắc
+
 - tôi muốn tham khảo ý kiến của bạn về vấn đề xác thực sinh trắc học của 
 buyer và seller để đề phòng các trường hợp lừa đảo và nhằm phục vụ cho 
 các việc liên quan đến tiền bạc và pháp luật nhà nước, có cần thiết không?
-- Khi đăng các sản phẩm mới lên sẽ được cho vào trạng thái đang chờ phê duyệt và sẽ được duyệt tự động bằng AI
+- Khi đăng các sản phẩm mới lên sẽ được cho vào trạng thái đang chờ phê 
+duyệt và sẽ được duyệt tự động bằng AI, sẽ kiểm duyệt xem đúng ngành hàng 
+không, hình ảnh có phù hợp với tiêu đề không, hay là hình ảnh bị  vi phạm 
+chính sách không
 - giờ đã làm trang người bán và người mua rồi, còn trung gian thì sao chúng 
 ta phải giải quyết thế nào, kiểu như trung gian là người lấy hàng giao hàng 
 và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, có cần làm 1 app riêng không?
-- lý do huỷ hàng thì thêm 1 vài option có sẵn để user chọn và 1 option other để user tự nhập lý do
+- tôi muốn lý do huỷ hàng thì thêm 1 vài option có sẵn để user chọn và 1 option other để user tự nhập lý do
 - thêm chức năng mỗi loại sản phẩm sẽ có hình ảnh tương ứng, trong trang 
 detail sản phẩm thì mỗi phân loại sẽ đính kèm hình ảnh tương ứng và khi 
 user chọn phân loại nào thì hình ảnh hiển thị sẽ tự động đổi tương ứng, 
 nếu seller không đính kèm ảnh chính vào thì sẽ lấy hình ảnh của từng phân 
 loại làm ảnh hiển thị
-- Soạn trang điều khoản dịch và chính sách bảo mật cho merkovia sao cho phù 
-hợp nhé, làm hẳn 2 route riêng cho 2 trang này luôn
+- Soạn  trang Giới thiệu web, trang điều khoản dịch, chính sách bảo mật cho merkovia sao cho phù 
+hợp nhé, làm hẳn 3 route riêng cho 3 trang này luôn rồi sau đó gắn route phù 
+hợp vào những chỗ cần thiết như trang signup và footer của trang buyer/seller
+- Soạn  trang trung tâm trợ giúp, chính sách đổi trả, hướng dẫn mua hàng cho 
+merkovia sao cho phù hợp nhé, làm hẳn 3 route riêng cho 3 trang này luôn rồi 
+sau đó gắn route phù hợp vào những chỗ cần thiết ở footer của trang buyer và seller
+- sửa lỗi khi vào trang detail của bất kỳ sản phẩm nào thì nó lại tự động 
+hiển thị ở giữa trang chứ không phải đầu trang, làm cho lần nào tôi vào 
+cũng phải scroll lên 1 chút để tới đầu trang chi tiết sản phẩm
+- Tính năng tin nhắn hiện tại có cần cải thiện thêm gì không, tôi thấy 
+nó còn khá đơn giản
+- Tính năng tính số lượt view cho sản phẩm hiện tại đã hợp lý chưa, cần 
+logic chính xác và ràng buộc hơn hay chỉ cần user click vào trang là tính 
+là 1 view? phải phòng ngừa user buff view ảo
