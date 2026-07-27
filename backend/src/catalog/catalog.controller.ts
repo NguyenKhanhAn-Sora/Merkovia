@@ -1,5 +1,6 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 import { CatalogService } from './catalog.service';
 import { BrowseProductsDto } from './dto/browse-products.dto';
 
@@ -25,8 +26,9 @@ export class CatalogController {
   }
 
   @Get('products/:slug')
-  product(@Param('slug') slug: string) {
-    return this.catalog.productBySlug(slug);
+  @Throttle({ default: { limit: 90, ttl: 60_000 } })
+  product(@Param('slug') slug: string, @Req() req: Request) {
+    return this.catalog.productBySlug(slug, req);
   }
 
   @Get('shops/:slug')

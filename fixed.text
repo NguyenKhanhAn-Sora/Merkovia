@@ -26,6 +26,3 @@ hiển thị ở giữa trang chứ không phải đầu trang, làm cho lần n
 cũng phải scroll lên 1 chút để tới đầu trang chi tiết sản phẩm
 - Tính năng tin nhắn hiện tại có cần cải thiện thêm gì không, tôi thấy 
 nó còn khá đơn giản
-- Tính năng tính số lượt view cho sản phẩm hiện tại đã hợp lý chưa, cần 
-logic chính xác và ràng buộc hơn hay chỉ cần user click vào trang là tính 
-là 1 view? phải phòng ngừa user buff view ảo

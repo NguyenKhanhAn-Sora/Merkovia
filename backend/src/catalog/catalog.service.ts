@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { JwtService } from '@nestjs/jwt';
+import type { Request } from 'express';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
@@ -11,6 +13,8 @@ import { BrowseProductsDto } from './dto/browse-products.dto';
 import { isDealLive } from '../products/deal';
 import { buildSearchText } from '../common/text';
 import { SemanticSearchService } from '../search/semantic-search.service';
+import { ViewCounterService } from './view-counter.service';
+import { readAccessToken, scopeFromRequest } from '../common/auth-scope';
 
 /** Sắp xếp cho người mua → điều kiện sort của Mongo. */
 const SORTS: Record<string, Record<string, 1 | -1>> = {
@@ -39,6 +43,8 @@ export class CatalogService {
     @InjectModel(Category.name)
     private readonly categoryModel: Model<CategoryDocument>,
     private readonly semantic: SemanticSearchService,
+    private readonly viewCounter: ViewCounterService,
+    private readonly jwt: JwtService,
   ) {}
 
   /** Điều kiện lọc sản phẩm được phép hiển thị công khai. */
@@ -244,7 +250,7 @@ export class CatalogService {
 
   /* ------------------------------ Chi tiết ------------------------------- */
 
-  async productBySlug(slug: string) {
+  async productBySlug(slug: string, req?: Request) {
     const product = await this.productModel
       .findOne({ slug, ...this.visibleProductMatch })
       .populate([
@@ -259,10 +265,7 @@ export class CatalogService {
       throw new NotFoundException('Không tìm thấy sản phẩm.');
     }
 
-    // Đếm lượt xem: không chặn phản hồi, hỏng cũng không ảnh hưởng người dùng.
-    void this.productModel
-      .updateOne({ _id: product._id }, { $inc: { 'stats.views': 1 } })
-      .catch(() => undefined);
+    this.countView(product, shop, req);
 
     return {
       product: {
@@ -293,6 +296,48 @@ export class CatalogService {
         shop: this.publicShop(shop),
       },
     };
+  }
+
+  /**
+   * Đếm lượt xem CÓ RÀNG BUỘC (chống buff view ảo), fail-safe:
+   *  - Bỏ qua request từ app Người Bán (xem/xem trước hàng không phải lượt mua).
+   *  - Không tính khi CHÍNH CHỦ shop tự xem hàng của mình.
+   *  - Mỗi người xem (tài khoản hoặc IP) chỉ +1 trong cửa sổ `dedupSeconds`.
+   */
+  private countView(
+    product: ProductDocument,
+    shop: ShopDocument,
+    req?: Request,
+  ) {
+    if (!req) return;
+    if (scopeFromRequest(req) === 'seller') return;
+
+    const viewer = this.resolveViewer(req);
+    // Chủ shop tự xem → không tính (chặn tự buff bằng chính tài khoản mình).
+    if (viewer.userId && String(shop.owner) === viewer.userId) return;
+
+    const viewerKey = viewer.userId ? `u:${viewer.userId}` : `ip:${viewer.ip}`;
+    if (!this.viewCounter.shouldCount(String(product._id), viewerKey)) return;
+
+    // Không chặn phản hồi, hỏng cũng không ảnh hưởng người dùng.
+    void this.productModel
+      .updateOne({ _id: product._id }, { $inc: { 'stats.views': 1 } })
+      .catch(() => undefined);
+  }
+
+  /** Định danh người xem: tài khoản (nếu có phiên hợp lệ) hoặc IP. */
+  private resolveViewer(req: Request): { userId?: string; ip: string } {
+    const ip = req.ip ?? 'unknown';
+    const token = readAccessToken(req);
+    if (token) {
+      try {
+        const payload = this.jwt.verify<{ sub: string }>(token);
+        if (payload?.sub) return { userId: payload.sub, ip };
+      } catch {
+        // Token hỏng/hết hạn → coi như khách, đếm theo IP.
+      }
+    }
+    return { ip };
   }
 
   /* ------------------------------ Gian hàng ------------------------------ */

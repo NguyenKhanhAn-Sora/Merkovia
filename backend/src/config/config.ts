@@ -82,6 +82,16 @@ export const config = {
     length: 6,
   },
 
+  // Đếm lượt xem sản phẩm
+  view: {
+    /**
+     * Cửa sổ chống đếm trùng: MỖI người xem chỉ +1 view/sản phẩm trong khoảng
+     * này. Ngăn refresh liên tục hay script gọi API để "buff" view ảo. Người
+     * xem = tài khoản (nếu đăng nhập) hoặc IP (khách).
+     */
+    dedupSeconds: durationSeconds('VIEW_DEDUP_WINDOW', 6 * 3600), // 6 giờ
+  },
+
   // JWT
   jwt: {
     secret: required('JWT_SECRET'),
