@@ -87,7 +87,22 @@ export class ChatController {
     @Body() dto: SendMessageDto,
     @Req() req: Request,
   ) {
-    return this.chat.send(user, this.role(req), id, dto.text);
+    return this.chat.send(user, this.role(req), id, {
+      text: dto.text,
+      images: dto.images,
+    });
+  }
+
+  /** Báo "đang gõ…" cho phía bên kia (client tự giới hạn nhịp gọi). */
+  @Post('conversations/:id/typing')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
+  typing(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    return this.chat.notifyTyping(user, this.role(req), id);
   }
 
   @Post('conversations/:id/read')

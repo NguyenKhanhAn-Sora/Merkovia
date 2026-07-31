@@ -49,6 +49,31 @@ export class MediaController {
    *    người lạ đẩy file lên kho của mình; để mở là mời người ta dùng làm chỗ
    *    chứa file miễn phí.
    */
+  /**
+   * Ảnh đính kèm tin nhắn. Có ĐĂNG NHẬP + giới hạn tần suất như `review`: đây
+   * cũng là đường cho phép người dùng đẩy file lên kho, không được để mở.
+   */
+  @Post('chat')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 40, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * MB } }))
+  uploadChatImage(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * MB }),
+          new FileTypeValidator({ fileType: /image\/(png|jpe?g|webp|gif)/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.media.upload(
+      { buffer: file.buffer, mimetype: file.mimetype },
+      'chat',
+    );
+  }
+
   @Post('review')
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })

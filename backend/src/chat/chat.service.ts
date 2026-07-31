@@ -15,8 +15,14 @@ import {
 import { Message, MessageDocument } from './schemas/message.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { Profile, ProfileDocument } from '../profiles/schemas/profile.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import type { UserDocument } from '../users/schemas/user.schema';
+
+/** Ảnh đính kèm khi gửi (đã upload). */
+interface OutgoingImage {
+  url: string;
+  key?: string;
+}
 
 const CONV_PAGE = 20;
 const MSG_PAGE = 30;
@@ -33,6 +39,7 @@ export class ChatService {
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
     @InjectModel(Profile.name)
     private readonly profileModel: Model<ProfileDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly gateway: RealtimeGateway,
   ) {}
 
@@ -200,26 +207,32 @@ export class ChatService {
     user: UserDocument,
     role: ChatRole,
     convId: string,
-    text: string,
+    payload: { text?: string; images?: OutgoingImage[] },
   ) {
     const conv = await this.requireConversation(user, role, convId);
-    const body = text.trim();
-    if (!body) throw new BadRequestException('Nội dung tin nhắn trống.');
+    const body = payload.text?.trim() ?? '';
+    const images = (payload.images ?? []).filter((i) => i?.url);
+    // Phải có ít nhất VĂN BẢN hoặc ẢNH — tin rỗng hoàn toàn là vô nghĩa.
+    if (!body && images.length === 0) {
+      throw new BadRequestException('Nội dung tin nhắn trống.');
+    }
 
     const msg = await this.msgModel.create({
       conversation: conv._id,
       senderRole: role,
       sender: user._id,
-      text: body,
+      text: body || undefined,
+      images: images.map((i) => ({ url: i.url, key: i.key })),
     });
 
     const now = new Date();
-    // Cộng chưa-đọc cho PHÍA KIA, cập nhật tóm tắt để danh sách khỏi join.
+    // Tóm tắt cho danh sách: chỉ-ảnh thì hiện nhãn thay vì chuỗi rỗng.
+    const preview = body || (images.length ? '[Hình ảnh]' : '');
     await this.convModel.updateOne(
       { _id: conv._id },
       {
         $set: {
-          lastMessage: { text: body, senderRole: role, at: now },
+          lastMessage: { text: preview, senderRole: role, at: now },
           lastMessageAt: now,
         },
         $inc: role === 'buyer' ? { sellerUnread: 1 } : { buyerUnread: 1 },
@@ -228,6 +241,16 @@ export class ChatService {
 
     await this.broadcast(conv, this.shapeMessage(msg));
     return { message: this.shapeMessage(msg) };
+  }
+
+  /** Báo phía bên kia "đang gõ…" — sự kiện thoáng qua, không lưu DB. */
+  async notifyTyping(user: UserDocument, role: ChatRole, convId: string) {
+    const conv = await this.requireConversation(user, role, convId);
+    const otherRole: ChatRole = role === 'buyer' ? 'seller' : 'buyer';
+    await this.emitTo(conv, otherRole, 'chat:typing', {
+      conversationId: String(conv._id),
+    });
+    return { ok: true };
   }
 
   /** Đánh dấu đã đọc phía mình + báo bên kia để hiện "Đã xem". */
@@ -290,7 +313,8 @@ export class ChatService {
       id: String(m._id),
       conversationId: String(m.conversation),
       senderRole: m.senderRole,
-      text: m.text,
+      text: m.text ?? '',
+      images: (m.images ?? []).map((i) => ({ url: i.url })),
       readAt: m.readAt,
       createdAt: (m as unknown as { createdAt: Date }).createdAt,
     };
@@ -312,11 +336,16 @@ export class ChatService {
       );
       const shops = await this.shopModel
         .find({ _id: { $in: ids } })
-        .select('name slug logoUrl')
+        .select('name slug logoUrl owner')
         .lean();
       const byId = new Map(shops.map((s) => [String(s._id), s]));
+      // Trạng thái hoạt động của ĐỐI PHƯƠNG = chủ shop (app người bán).
+      const activeBy = await this.lastActiveMap(
+        shops.map((s) => String(s.owner)),
+      );
       return convs.map((c) => {
         const s = byId.get(String(c.shop));
+        const owner = s ? String(s.owner) : '';
         return {
           ...this.baseConversation(c, role),
           peer: {
@@ -324,6 +353,8 @@ export class ChatService {
             name: s?.name ?? 'Gian hàng',
             slug: s?.slug,
             avatarUrl: s?.logoUrl,
+            online: owner ? this.gateway.isOnline(owner, 'seller') : false,
+            lastActiveAt: activeBy.get(owner),
           },
         };
       });
@@ -332,22 +363,43 @@ export class ChatService {
     const ids = [...new Set(convs.map((c) => String(c.buyer)))].map(
       (id) => new Types.ObjectId(id),
     );
-    const profiles = await this.profileModel
-      .find({ user: { $in: ids } })
-      .select('user fullName displayName avatarUrl')
-      .lean();
+    const [profiles, activeBy] = await Promise.all([
+      this.profileModel
+        .find({ user: { $in: ids } })
+        .select('user fullName displayName avatarUrl')
+        .lean(),
+      this.lastActiveMap(convs.map((c) => String(c.buyer))),
+    ]);
     const byUser = new Map(profiles.map((p) => [String(p.user), p]));
     return convs.map((c) => {
-      const p = byUser.get(String(c.buyer));
+      const buyerId = String(c.buyer);
+      const p = byUser.get(buyerId);
       return {
         ...this.baseConversation(c, role),
         peer: {
-          id: String(c.buyer),
+          id: buyerId,
           name: p?.fullName || p?.displayName || 'Người mua',
           avatarUrl: p?.avatarUrl,
+          online: this.gateway.isOnline(buyerId, 'buyer'),
+          lastActiveAt: activeBy.get(buyerId),
         },
       };
     });
+  }
+
+  /** Bản đồ userId → lastActiveAt cho một loạt người (một truy vấn). */
+  private async lastActiveMap(
+    userIds: string[],
+  ): Promise<Map<string, Date | undefined>> {
+    const ids = [...new Set(userIds.filter(Boolean))].map(
+      (id) => new Types.ObjectId(id),
+    );
+    if (ids.length === 0) return new Map();
+    const users = await this.userModel
+      .find({ _id: { $in: ids } })
+      .select('lastActiveAt')
+      .lean();
+    return new Map(users.map((u) => [String(u._id), u.lastActiveAt]));
   }
 
   private baseConversation(c: ConversationDocument, role: ChatRole) {

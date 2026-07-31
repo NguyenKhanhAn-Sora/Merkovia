@@ -9,7 +9,6 @@ chính sách không
 - giờ đã làm trang người bán và người mua rồi, còn trung gian thì sao chúng 
 ta phải giải quyết thế nào, kiểu như trung gian là người lấy hàng giao hàng 
 và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, có cần làm 1 app riêng không?
-- tôi muốn lý do huỷ hàng thì thêm 1 vài option có sẵn để user chọn và 1 option other để user tự nhập lý do
 - thêm chức năng mỗi loại sản phẩm sẽ có hình ảnh tương ứng, trong trang 
 detail sản phẩm thì mỗi phân loại sẽ đính kèm hình ảnh tương ứng và khi 
 user chọn phân loại nào thì hình ảnh hiển thị sẽ tự động đổi tương ứng, 
@@ -21,5 +20,3 @@ hợp vào những chỗ cần thiết như trang signup và footer của trang 
 - Soạn  trang trung tâm trợ giúp, chính sách đổi trả, hướng dẫn mua hàng cho 
 merkovia sao cho phù hợp nhé, làm hẳn 3 route riêng cho 3 trang này luôn rồi 
 sau đó gắn route phù hợp vào những chỗ cần thiết ở footer của trang buyer và seller
-- Tính năng tin nhắn hiện tại có cần cải thiện thêm gì không, tôi thấy 
-nó còn khá đơn giản

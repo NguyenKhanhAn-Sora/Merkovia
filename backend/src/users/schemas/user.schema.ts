@@ -54,6 +54,10 @@ export class User {
   @Prop()
   lastLoginAt?: Date;
 
+  /** Lần cuối còn kết nối socket — để hiện "đang hoạt động / hoạt động N phút trước". */
+  @Prop()
+  lastActiveAt?: Date;
+
   /** Xoá mềm. */
   @Prop({ type: Date, default: null })
   deletedAt?: Date | null;
