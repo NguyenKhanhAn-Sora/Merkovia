@@ -14,6 +14,7 @@ import {
   ListReviewsDto,
   ListShopReviewsDto,
   ReplyReviewDto,
+  UpdateReviewDto,
 } from './dto/review.dto';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
@@ -21,6 +22,7 @@ import { Profile, ProfileDocument } from '../profiles/schemas/profile.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { UserDocument } from '../users/schemas/user.schema';
+import { config } from '../config/config';
 
 const PAGE_SIZE = 10;
 
@@ -129,7 +131,14 @@ export class ReviewsService {
     return { review: await this.publicReview(review) };
   }
 
-  /** Đánh giá của chính mình cho một đơn — để giao diện biết dòng nào đã viết. */
+  /**
+   * Đánh giá của chính mình cho một đơn — để giao diện biết dòng nào đã viết,
+   * VÀ đủ dữ liệu để tự điền lại form khi sửa (rating/comment/media/anonymous).
+   *
+   * `canEdit`/`editableUntil` tính sẵn ở server theo `reviewEditWindowHours`
+   * hiện hành — giao diện không tự suy ra hạn sửa để tránh lệch nếu sau này
+   * đổi cấu hình mà quên đồng bộ hai nơi.
+   */
   async myReviewsForOrder(user: UserDocument, orderId: string) {
     if (!Types.ObjectId.isValid(orderId)) return { reviews: [] };
     const reviews = await this.reviewModel
@@ -137,12 +146,78 @@ export class ReviewsService {
       .find({ order: new Types.ObjectId(orderId), buyer: user._id })
       .lean();
     return {
-      reviews: reviews.map((r) => ({
-        variantId: String(r.variant),
-        rating: r.rating,
-        comment: r.comment,
-      })),
+      reviews: reviews.map((r) => {
+        const editableUntil = this.reviewEditDeadline(
+          (r as unknown as { createdAt: Date }).createdAt,
+        );
+        return {
+          id: String(r._id),
+          variantId: String(r.variant),
+          rating: r.rating,
+          comment: r.comment,
+          media: r.media.map((m) => ({ kind: m.kind, url: m.url, key: m.key })),
+          anonymous: r.anonymous,
+          edited: r.edited,
+          editableUntil: editableUntil.toISOString(),
+          canEdit: !r.edited && new Date() < editableUntil,
+        };
+      }),
     };
+  }
+
+  /**
+   * Sửa đánh giá đã đăng — CHỈ MỘT LẦN, trong hạn `reviewEditWindowHours` kể từ
+   * lúc đăng. Giới hạn kép (một lần + có hạn) vẫn cho chữa lỗi gõ/đổi ý sớm mà
+   * không biến thành công cụ ép giá kiểu "1 sao doạ, đổi 5 sao sau khi được đền".
+   */
+  async update(user: UserDocument, reviewId: string, dto: UpdateReviewDto) {
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new NotFoundException('Không tìm thấy đánh giá.');
+    }
+    const review = await this.reviewModel.findOne({
+      _id: reviewId,
+      buyer: user._id,
+    });
+    if (!review) throw new NotFoundException('Không tìm thấy đánh giá.');
+
+    if (review.edited) {
+      throw new ForbiddenException('Đánh giá chỉ được sửa một lần.');
+    }
+    const deadline = this.reviewEditDeadline(
+      (review as unknown as { createdAt: Date }).createdAt,
+    );
+    if (new Date() > deadline) {
+      throw new ForbiddenException(
+        `Đã quá hạn sửa đánh giá (${config.reviewEditWindowHours} giờ kể từ lúc đăng).`,
+      );
+    }
+
+    const oldRating = review.rating;
+    review.rating = dto.rating;
+    review.comment = dto.comment?.trim() ?? '';
+    review.media = (dto.media ?? []).map((m) => ({
+      kind: m.kind as 'image' | 'video',
+      url: m.url.trim(),
+      key: m.key?.trim(),
+    }));
+    review.anonymous = !!dto.anonymous;
+    review.edited = true;
+    await review.save();
+
+    // Điểm sao đổi thì bù trừ đúng ô cũ/mới — trừ trước cộng sau để không bao
+    // giờ có khoảnh khắc tổng bị âm nếu hai request xen kẽ nhau.
+    if (dto.rating !== oldRating) {
+      await this.applyRatingDelta(review.product, deltaFor(oldRating, -1));
+      await this.applyRatingDelta(review.product, deltaFor(dto.rating, +1));
+    }
+
+    return { review: await this.publicReview(review) };
+  }
+
+  private reviewEditDeadline(createdAt: Date): Date {
+    return new Date(
+      createdAt.getTime() + config.reviewEditWindowHours * 3_600_000,
+    );
   }
 
   /** Như trên nhưng cho nhiều đơn — trang danh sách hỏi MỘT lượt. */
@@ -257,7 +332,12 @@ export class ReviewsService {
     };
   }
 
-  /** Người bán phản hồi một đánh giá. */
+  /**
+   * Người bán phản hồi một đánh giá — gọi lại được nhiều lần để SỬA phản hồi
+   * đã gửi. `repliedAt` giữ nguyên mốc lần đầu; lần sửa ghi vào `replyEditedAt`
+   * để giao diện hiện rõ "(đã chỉnh sửa)", không âm thầm đổi nội dung mà vẫn
+   * hiện ngày trả lời ban đầu.
+   */
   async reply(user: UserDocument, reviewId: string, dto: ReplyReviewDto) {
     const shop = await this.shopModel.findOne({ owner: user._id });
     if (!shop) throw new ForbiddenException('Tài khoản chưa có gian hàng.');
@@ -271,8 +351,12 @@ export class ReviewsService {
     });
     if (!review) throw new NotFoundException('Không tìm thấy đánh giá.');
 
+    if (review.reply) {
+      review.replyEditedAt = new Date();
+    } else {
+      review.repliedAt = new Date();
+    }
     review.reply = dto.reply.trim();
-    review.repliedAt = new Date();
     await review.save();
 
     return { review: await this.publicReview(review, { forShop: true }) };
@@ -445,6 +529,7 @@ export class ReviewsService {
         ? { replyBy: { name: shop?.name, logoUrl: shop?.logoUrl } }
         : {}),
       repliedAt: r.repliedAt,
+      replyEdited: !!r.replyEditedAt,
       edited: r.edited,
       createdAt: (r as unknown as { createdAt: Date }).createdAt,
       // Người bán cần biết đánh giá thuộc sản phẩm nào để mở đúng trang.

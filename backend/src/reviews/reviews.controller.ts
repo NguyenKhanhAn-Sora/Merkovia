@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -16,6 +17,7 @@ import {
   ListReviewsDto,
   ListShopReviewsDto,
   ReplyReviewDto,
+  UpdateReviewDto,
 } from './dto/review.dto';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { UserDocument } from '../users/schemas/user.schema';
@@ -41,6 +43,17 @@ export class ReviewsController {
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   create(@CurrentUser() user: UserDocument, @Body() dto: CreateReviewDto) {
     return this.reviews.create(user, dto);
+  }
+
+  /** Sửa đánh giá đã đăng — chỉ một lần, trong hạn (xem `ReviewsService.update`). */
+  @Patch(':id')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  update(
+    @CurrentUser() user: UserDocument,
+    @Param('id') id: string,
+    @Body() dto: UpdateReviewDto,
+  ) {
+    return this.reviews.update(user, id, dto);
   }
 
   /**

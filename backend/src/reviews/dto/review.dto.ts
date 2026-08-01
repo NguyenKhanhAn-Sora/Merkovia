@@ -65,6 +65,35 @@ export class CreateReviewDto {
   anonymous?: boolean;
 }
 
+/** Sửa đánh giá đã đăng — cùng khuôn với lúc tạo, chỉ bỏ đơn/biến thể (cố định). */
+export class UpdateReviewDto {
+  @Type(() => Number)
+  @IsInt({ message: 'Vui lòng chọn số sao.' })
+  @Min(1, { message: 'Vui lòng chọn từ 1 đến 5 sao.' })
+  @Max(5, { message: 'Vui lòng chọn từ 1 đến 5 sao.' })
+  rating: number;
+
+  @IsOptional()
+  @IsString({ message: 'Nội dung đánh giá không hợp lệ.' })
+  @MaxLength(MAX_COMMENT, {
+    message: `Nội dung đánh giá tối đa ${MAX_COMMENT} ký tự.`,
+  })
+  comment?: string;
+
+  @IsOptional()
+  @IsArray({ message: 'Danh sách tệp đính kèm không hợp lệ.' })
+  @ArrayMaxSize(MAX_MEDIA, {
+    message: `Mỗi đánh giá đính kèm tối đa ${MAX_MEDIA} ảnh/video.`,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => ReviewMediaDto)
+  media?: ReviewMediaDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  anonymous?: boolean;
+}
+
 /** Phản hồi của người bán. */
 export class ReplyReviewDto {
   @IsString({ message: 'Vui lòng nhập nội dung phản hồi.' })

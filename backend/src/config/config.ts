@@ -204,6 +204,14 @@ export const config = {
    */
   returnWindowDays: optionalNumber('RETURN_WINDOW_DAYS', 7),
 
+  /**
+   * Số giờ kể từ lúc đăng mà người mua còn được sửa đánh giá của mình — và chỉ
+   * sửa được ĐÚNG MỘT LẦN trong khoảng đó (xem `Review.edited`). Đủ để chữa lỗi
+   * gõ nhầm hay đổi ý sau khi shop khắc phục vấn đề, nhưng không đủ dài để biến
+   * thành công cụ ép giá ("cho 1 sao rồi đổi 5 sao sau khi được đền bù").
+   */
+  reviewEditWindowHours: optionalNumber('REVIEW_EDIT_WINDOW_HOURS', 48),
+
   // Lưu trữ media — Cloudflare R2 (S3-compatible). Optional để app vẫn boot
   // khi chưa cấu hình; endpoint upload sẽ báo lỗi rõ ràng nếu thiếu.
   r2: {

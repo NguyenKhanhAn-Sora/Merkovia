@@ -78,8 +78,13 @@ export class Review {
   @Prop({ trim: true, maxlength: MAX_COMMENT })
   reply?: string;
 
+  /** Lần đầu phản hồi — KHÔNG đổi khi shop sửa lại phản hồi sau đó. */
   @Prop()
   repliedAt?: Date;
+
+  /** Lần gần nhất shop sửa phản hồi — có giá trị thì UI hiện "(đã chỉnh sửa)". */
+  @Prop()
+  replyEditedAt?: Date;
 
   /**
    * Đã sửa hay chưa. Cho sửa MỘT lần trong thời hạn ngắn để chữa lỗi gõ, nhưng

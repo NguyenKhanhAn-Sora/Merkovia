@@ -14,8 +14,5 @@ detail sản phẩm thì mỗi phân loại sẽ đính kèm hình ảnh tương
 user chọn phân loại nào thì hình ảnh hiển thị sẽ tự động đổi tương ứng, 
 nếu seller không đính kèm ảnh chính vào thì sẽ lấy hình ảnh của từng phân 
 loại làm ảnh hiển thị
-- Soạn  trang Giới thiệu web, trang điều khoản dịch, chính sách bảo mật cho merkovia sao cho phù 
-hợp nhé, làm hẳn 3 route riêng cho 3 trang này luôn rồi sau đó gắn route phù 
-hợp vào những chỗ cần thiết như trang signup và footer của trang buyer/seller
 - đánh giá sản phẩm và phản hồi của seller đối với đánh giá đó thì có được sửa hoặc 
 xoá không, ý kiến của bạn thế nào
