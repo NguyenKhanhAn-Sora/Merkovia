@@ -20,3 +20,5 @@ hợp vào những chỗ cần thiết như trang signup và footer của trang 
 - Soạn  trang trung tâm trợ giúp, chính sách đổi trả, hướng dẫn mua hàng cho 
 merkovia sao cho phù hợp nhé, làm hẳn 3 route riêng cho 3 trang này luôn rồi 
 sau đó gắn route phù hợp vào những chỗ cần thiết ở footer của trang buyer và seller
+- đánh giá sản phẩm và phản hồi của seller đối với đánh giá đó thì có được sửa hoặc 
+xoá không, ý kiến của bạn thế nào
