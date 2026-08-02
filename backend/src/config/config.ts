@@ -99,9 +99,25 @@ export const config = {
     refreshExpires: durationSeconds('JWT_REFRESH_IN7d', 7 * 86400), // giây
   },
 
+  /**
+   * Tài khoản admin root — KHÔNG lưu trong DB, chỉ cấu hình qua .env vì hiện
+   * chỉ có một tài khoản quản trị duy nhất (chưa cần quản lý nhiều admin).
+   * Token admin cố tình sống ngắn hơn buyer/seller nhiều (mặc định 15 phút,
+   * làm mới tối đa 8 giờ) vì đây là tài khoản có toàn quyền trên hệ thống.
+   */
+  admin: {
+    email: required('ADMIN_EMAIL'),
+    password: required('ADMIN_PASSWORD'),
+    accessExpires: optionalNumber('ADMIN_JWT_EXPIRES_IN', 900), // giây (15 phút)
+    refreshExpires: durationSeconds('ADMIN_JWT_REFRESH_IN', 8 * 3600), // giây (8h)
+  },
+
   // CORS: danh sách origin cụ thể (không dùng '*') để cookie credentials hoạt động.
-  // Nhiều origin cách nhau bằng dấu phẩy (buyer 3000, seller 3001…).
-  corsOrigin: optional('CORS_ORIGIN', 'http://localhost:3000,http://localhost:3001')
+  // Nhiều origin cách nhau bằng dấu phẩy (buyer 3000, seller 3001, admin 3002…).
+  corsOrigin: optional(
+    'CORS_ORIGIN',
+    'http://localhost:3000,http://localhost:3001,http://localhost:3002',
+  )
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
@@ -173,6 +189,9 @@ export const config = {
    * theo cổng được. Xem `common/auth-scope.ts`.
    */
   sellerUrl: optional('SELLER_URL', 'http://localhost:3001'),
+
+  /** URL app Quản trị (admin) — cùng vai trò với `sellerUrl` ở trên. */
+  adminUrl: optional('ADMIN_URL', 'http://localhost:3002'),
 
   /**
    * Bí mật ký/xác thực webhook thanh toán.

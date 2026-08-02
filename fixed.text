@@ -9,18 +9,13 @@ chính sách không
 - giờ đã làm trang người bán và người mua rồi, còn trung gian thì sao chúng 
 ta phải giải quyết thế nào, kiểu như trung gian là người lấy hàng giao hàng 
 và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, có cần làm 1 app riêng không?
-- thêm chức năng mỗi loại sản phẩm sẽ có hình ảnh tương ứng, trong trang 
-detail sản phẩm thì mỗi phân loại sẽ đính kèm hình ảnh tương ứng và khi 
-user chọn phân loại nào thì hình ảnh hiển thị sẽ tự động đổi tương ứng, 
-nếu seller không đính kèm ảnh chính vào thì sẽ lấy hình ảnh của từng phân 
-loại làm ảnh hiển thị
 - có nên làm chức năng report 1 store nào đó hoặc 1 buyer nào đó không, ý kiến của bạn thế nao?
-- sửa lỗi khi seller vào tin nhắn với với buyer thì khung tin nhắn không 
-scroll xuống dưới cùng mà có lúc nó lại hiển thị ở giữa đoạn chat làm tôi 
-phải scroll thủ công xuống dưới cùng
 - phải xử lý thế nào nếu seller có đơn nhưng rất lâu vẫn không xác nhận đơn 
 hoặc không bàn giao cho vận chuyển làm buyer chờ đợi mãi mà không làm được gì
-- khung hiển thị ảnh chính của sản phẩm nên để fit để hiển thị toàn bộ ảnh chứ không nên để cover 
-có thể sẽ mất thông tin sản phẩm quan trọng mô tả trong ảnh
-- trong trang detail sản phẩm có phần đánh giá sản phẩm rồi ở dưới có phần đánh giá từ người 
-mua nữa là sao vậy
+- đảm bảo admin đang thực hiện các tác vụ quan trọng mà không bị logout 
+ra vì quá hạn token, thực hiện các biện pháp bảo mật an toàn và hợp lý đối với admin
+- làm giao diện UI các chức năng sẽ làm trong tương lai trước, cứ phát thảo 
+sơ bộ để sau này phát triển sâu thêm là được, chưa cần đụng tới tính năng 
+thật. Trước khi làm thì suy nghĩ kỹ các tác vụ cần thiết đối với admin và 
+cần thiết cho trang web hiện tại merkovia rồi mới làm, giao diện thân thiện, 
+dễ nhìn, chuyên nghiệp, hiện đại

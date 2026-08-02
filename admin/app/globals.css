@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ *
+ *  Merkovia — Quản trị (Admin) · Galaxy design tokens (Tailwind v4 @theme)
+ *
+ *  Cùng vũ trụ galaxy với người mua/người bán, nhưng ĐỔI dải accent sang
+ *  cyan → lam điện → ngọc lam để tạo cảm giác "phòng điều khiển", tách biệt
+ *  rõ với tông tím-hồng của người mua và vàng kim của người bán.
+ *  Giữ nguyên TÊN token (cosmic-*) nên toàn bộ UI dùng lại được, chỉ
+ *  cần đổi giá trị ở đây là cả app đổi tông.
+ * ------------------------------------------------------------------ */
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Deep-space neutrals */
+  --color-void: #030812;
+  --color-space: #050f1c;
+  --color-nebula: #061826;
+
+  /* Admin accent ramp (cyan → lam điện → ngọc lam) */
+  --color-cosmic-blue: #38bdf8;
+  --color-cosmic-indigo: #0ea5e9;
+  --color-cosmic-violet: #22d3ee;
+  --color-cosmic-purple: #67e8f9;
+  --color-cosmic-fuchsia: #2dd4bf;
+  --color-star: #eafdff;
+
+  --radius-card: 1.75rem;
+  --ease-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --animate-twinkle: twinkle 4s ease-in-out infinite;
+  --animate-aurora: aurora 18s ease-in-out infinite;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-rise: rise 0.9s var(--ease-fluid) both;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes aurora {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33% { transform: translate3d(4%, -3%, 0) scale(1.08); }
+  66% { transform: translate3d(-3%, 4%, 0) scale(0.96); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(22px); filter: blur(6px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes orbit-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Base
+ * ------------------------------------------------------------------ */
+html { color-scheme: dark; }
+
+/* Tailwind v4 preflight bỏ cursor:pointer mặc định của button → trả lại cho
+   mọi phần tử bấm được (áp dụng toàn app, không phải sửa từng nút). */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
+body {
+  background-color: var(--color-void);
+  color: var(--color-star);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Autofill shouldn't paint a white box over the glass inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #e0f7ff;
+  transition: background-color 9999s ease-in-out 0s;
+  caret-color: #e0f7ff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -7,6 +7,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { AdminAuthModule } from './admin-auth/admin-auth.module';
 import { UsersModule } from './users/users.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { AddressesModule } from './addresses/addresses.module';
@@ -54,6 +55,7 @@ import { config } from './config/config';
     ChatModule,
     CartModule,
     AuthModule,
+    AdminAuthModule,
   ],
   controllers: [AppController],
   // Đếm theo phiên đăng nhập, không theo IP — nhiều người dùng chung một IP

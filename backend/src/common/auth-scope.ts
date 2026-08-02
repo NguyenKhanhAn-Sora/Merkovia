@@ -13,14 +13,18 @@ import { config } from '../config/config';
  * Cách chữa: mỗi app một BỘ TÊN cookie riêng. Hai bộ tên cùng nằm trong một hũ
  * mà không đụng nhau, không phụ thuộc cổng hay tên miền.
  */
-export const APP_SCOPES = ['buyer', 'seller'] as const;
+export const APP_SCOPES = ['buyer', 'seller', 'admin'] as const;
 export type AppScope = (typeof APP_SCOPES)[number];
 
 /** Header để app tự khai mình là ai. */
 export const APP_HEADER = 'x-merkovia-app';
 
 /** Tiền tố tên cookie. Người mua giữ tên cũ để phiên đang đăng nhập không bị văng. */
-const PREFIX: Record<AppScope, string> = { buyer: '', seller: 'seller_' };
+const PREFIX: Record<AppScope, string> = {
+  buyer: '',
+  seller: 'seller_',
+  admin: 'admin_',
+};
 
 export function accessCookieName(scope: AppScope): string {
   return `${PREFIX[scope]}access_token`;
@@ -51,7 +55,9 @@ export function scopeFromRequest(req: Request): AppScope {
   }
 
   const origin = req.headers.origin;
-  if (origin && config.sellerUrl && origin === config.sellerUrl) return 'seller';
+  if (origin && config.sellerUrl && origin === config.sellerUrl)
+    return 'seller';
+  if (origin && config.adminUrl && origin === config.adminUrl) return 'admin';
 
   return 'buyer';
 }
@@ -101,7 +107,11 @@ export function scopeFromSocket(handshake: {
     return declared as AppScope;
   }
   const origin = handshake.headers.origin;
-  if (typeof origin === 'string' && config.sellerUrl && origin === config.sellerUrl) {
+  if (
+    typeof origin === 'string' &&
+    config.sellerUrl &&
+    origin === config.sellerUrl
+  ) {
     return 'seller';
   }
   return 'buyer';
