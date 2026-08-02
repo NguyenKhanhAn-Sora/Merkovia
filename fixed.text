@@ -14,3 +14,13 @@ detail sản phẩm thì mỗi phân loại sẽ đính kèm hình ảnh tương
 user chọn phân loại nào thì hình ảnh hiển thị sẽ tự động đổi tương ứng, 
 nếu seller không đính kèm ảnh chính vào thì sẽ lấy hình ảnh của từng phân 
 loại làm ảnh hiển thị
+- có nên làm chức năng report 1 store nào đó hoặc 1 buyer nào đó không, ý kiến của bạn thế nao?
+- sửa lỗi khi seller vào tin nhắn với với buyer thì khung tin nhắn không 
+scroll xuống dưới cùng mà có lúc nó lại hiển thị ở giữa đoạn chat làm tôi 
+phải scroll thủ công xuống dưới cùng
+- phải xử lý thế nào nếu seller có đơn nhưng rất lâu vẫn không xác nhận đơn 
+hoặc không bàn giao cho vận chuyển làm buyer chờ đợi mãi mà không làm được gì
+- khung hiển thị ảnh chính của sản phẩm nên để fit để hiển thị toàn bộ ảnh chứ không nên để cover 
+có thể sẽ mất thông tin sản phẩm quan trọng mô tả trong ảnh
+- trong trang detail sản phẩm có phần đánh giá sản phẩm rồi ở dưới có phần đánh giá từ người 
+mua nữa là sao vậy
