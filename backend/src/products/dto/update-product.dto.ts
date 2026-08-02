@@ -61,9 +61,9 @@ export class UpdateProductDto {
   @Type(() => VariantDto)
   variants?: VariantDto[];
 
+  /** Cho phép gửi `[]` để bỏ hết ảnh chung nếu mọi phân loại đã có ảnh riêng. */
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1, { message: 'Cần ít nhất 1 ảnh sản phẩm.' })
   @ArrayMaxSize(9, { message: 'Tối đa 9 ảnh.' })
   @ValidateNested({ each: true })
   @Type(() => ProductImageDto)

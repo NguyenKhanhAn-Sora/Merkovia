@@ -14,5 +14,3 @@ detail sản phẩm thì mỗi phân loại sẽ đính kèm hình ảnh tương
 user chọn phân loại nào thì hình ảnh hiển thị sẽ tự động đổi tương ứng, 
 nếu seller không đính kèm ảnh chính vào thì sẽ lấy hình ảnh của từng phân 
 loại làm ảnh hiển thị
-- đánh giá sản phẩm và phản hồi của seller đối với đánh giá đó thì có được sửa hoặc 
-xoá không, ý kiến của bạn thế nào

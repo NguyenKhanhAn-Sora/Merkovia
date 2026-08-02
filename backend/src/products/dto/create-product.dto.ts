@@ -159,12 +159,17 @@ export class CreateProductDto {
   @Type(() => VariantDto)
   variants: VariantDto[];
 
+  /**
+   * Không bắt buộc: sản phẩm có thể không có ảnh chung nếu MỖI phân loại đã
+   * có ảnh riêng — `ProductsService` kiểm tra chéo với `variants[].image`
+   * chứ không chặn cứng ở đây.
+   */
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1, { message: 'Cần ít nhất 1 ảnh sản phẩm.' })
   @ArrayMaxSize(9, { message: 'Tối đa 9 ảnh.' })
   @ValidateNested({ each: true })
   @Type(() => ProductImageDto)
-  images: ProductImageDto[];
+  images?: ProductImageDto[];
 
   @IsOptional()
   @ValidateNested()

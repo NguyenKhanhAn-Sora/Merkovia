@@ -204,6 +204,9 @@ export class CatalogService {
                 name: 1,
                 slug: 1,
                 images: { $slice: ['$images', 1] },
+                // Chỉ cần biết phân loại nào có ảnh để làm ảnh thay thế khi
+                // sản phẩm không có ảnh chung — không cần giá/kho ở đây.
+                'variants.image': 1,
                 priceMin: 1,
                 priceMax: 1,
                 totalStock: 1,
@@ -228,7 +231,11 @@ export class CatalogService {
         id: String(p._id),
         slug: p.slug,
         name: p.name,
-        image: p.images?.[0]?.url,
+        image:
+          p.images?.[0]?.url ??
+          (p.variants as { image?: string }[] | undefined)?.find(
+            (v) => v.image,
+          )?.image,
         priceMin: p.priceMin,
         priceMax: p.priceMax,
         deal: this.publicDeal(p.activeDeal),

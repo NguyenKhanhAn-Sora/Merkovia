@@ -174,6 +174,23 @@ export class ProductsService {
     });
   }
 
+  /**
+   * Ảnh sản phẩm giờ không bắt buộc — cho phép seller chỉ đính ảnh riêng cho
+   * từng phân loại. Nhưng phải có ảnh Ở ĐÂU ĐÓ, không thì thẻ sản phẩm và
+   * trang chi tiết không có gì hiển thị.
+   */
+  private assertHasImage(
+    images: { url: string }[],
+    variants: { image?: string }[],
+  ) {
+    const hasAny = images.length > 0 || variants.some((v) => !!v.image);
+    if (!hasAny) {
+      throw new BadRequestException(
+        'Cần ít nhất 1 ảnh — ảnh sản phẩm chung hoặc ảnh riêng cho một phân loại.',
+      );
+    }
+  }
+
   /** Cập nhật các trường dẫn xuất từ variants (giá min/max, tổng kho). */
   private syncDerived(product: ProductDocument) {
     const active = product.variants.filter((v) => v.isActive !== false);
@@ -218,6 +235,8 @@ export class ProductsService {
       );
     }
     this.validateVariants(dto.optionTiers, dto.variants);
+    const images = dto.images ?? [];
+    this.assertHasImage(images, dto.variants);
 
     const product = new this.productModel({
       shop: shop._id,
@@ -229,7 +248,7 @@ export class ProductsService {
       categoryPath: category.path,
       optionTiers: dto.optionTiers ?? [],
       variants: dto.variants,
-      images: dto.images,
+      images,
       video: dto.video,
       attributes: dto.attributes ?? [],
       shipping: dto.shipping ?? {},
@@ -293,7 +312,8 @@ export class ProductsService {
       items: items.map((p) => ({
         id: String(p._id),
         name: p.name,
-        image: p.images?.[0]?.url,
+        // Không có ảnh chung → lấy tạm ảnh của một phân loại bất kỳ có ảnh.
+        image: p.images?.[0]?.url ?? p.variants?.find((v) => v.image)?.image,
         priceMin: p.priceMin,
         priceMax: p.priceMax,
         totalStock: p.totalStock,
@@ -410,6 +430,9 @@ export class ProductsService {
       product.description = dto.description.trim() || undefined;
     }
     if (dto.images !== undefined) product.images = dto.images;
+    // Kiểm TRẠNG THÁI CUỐI (sau khi áp mọi thay đổi) — ảnh chung hoặc phân
+    // loại đổi ở request này đều phải giữ cho sản phẩm còn ít nhất 1 ảnh.
+    this.assertHasImage(product.images, product.variants);
     if (dto.video !== undefined) product.video = dto.video;
     if (dto.attributes !== undefined) product.attributes = dto.attributes;
     if (dto.shipping !== undefined) {

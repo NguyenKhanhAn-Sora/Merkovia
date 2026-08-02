@@ -154,7 +154,9 @@ export class PromotionsService {
 
     const products = await this.productModel
       .find({ shop: shop._id, deletedAt: null, activeDeal: { $ne: null } })
-      .select('name slug images priceMin priceMax totalStock status activeDeal')
+      .select(
+        'name slug images variants priceMin priceMax totalStock status activeDeal',
+      )
       .sort({ 'activeDeal.endsAt': 1 })
       .limit(200);
 
@@ -182,7 +184,7 @@ export class PromotionsService {
         status: 'active',
         $or: [{ activeDeal: null }, { activeDeal: { $exists: false } }],
       })
-      .select('name images priceMin priceMax')
+      .select('name images variants priceMin priceMax')
       .sort({ updatedAt: -1 })
       .limit(200);
 
@@ -190,7 +192,7 @@ export class PromotionsService {
       items: products.map((p) => ({
         id: String(p._id),
         name: p.name,
-        image: p.images?.[0]?.url,
+        image: p.images?.[0]?.url ?? p.variants?.find((v) => v.image)?.image,
         priceMin: p.priceMin,
         priceMax: p.priceMax,
       })),
@@ -242,7 +244,7 @@ export class PromotionsService {
       productId: String(p._id),
       name: p.name,
       slug: p.slug,
-      image: p.images?.[0]?.url,
+      image: p.images?.[0]?.url ?? p.variants?.find((v) => v.image)?.image,
       priceMin: p.priceMin,
       priceMax: p.priceMax,
       totalStock: p.totalStock,
