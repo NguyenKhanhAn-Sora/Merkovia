@@ -40,6 +40,18 @@ function handleSessionExpired() {
 }
 
 /**
+ * Chủ động gia hạn phiên — dùng bởi `useIdleSession` để làm mới token TRƯỚC
+ * khi hết hạn trong lúc admin còn đang thao tác, thay vì chỉ bị động chờ một
+ * request 401 rồi mới gia hạn. Refresh token cũng được cấp lại mỗi lần gọi
+ * (cửa sổ trượt) nên phiên không bao giờ hết hạn giữa chừng một tác vụ, MIỄN
+ * LÀ admin còn hoạt động — xem `use-idle-session.ts` cho phần dừng gia hạn
+ * khi admin rời máy.
+ */
+export function keepAliveRefresh(): Promise<boolean> {
+  return refreshSession();
+}
+
+/**
  * fetch cho các endpoint CẦN đăng nhập.
  * Gặp 401 → gia hạn ngầm → thử lại đúng một lần.
  * Không dùng cho login: 401 ở đó là lỗi thật (sai mật khẩu…).

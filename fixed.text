@@ -12,6 +12,3 @@ và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, 
 - có nên làm chức năng report 1 store nào đó hoặc 1 buyer nào đó không, ý kiến của bạn thế nao?
 - phải xử lý thế nào nếu seller có đơn nhưng rất lâu vẫn không xác nhận đơn 
 hoặc không bàn giao cho vận chuyển làm buyer chờ đợi mãi mà không làm được gì
-- đảm bảo admin đang thực hiện các tác vụ quan trọng mà không bị logout 
-ra bất thình lình vì quá hạn token, xem xét kỹ và thực hiện các biện pháp bảo 
-mật an toàn cần thiết và hợp lý đối với admin

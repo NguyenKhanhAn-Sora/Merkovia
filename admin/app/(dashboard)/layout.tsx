@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SignOut } from "@phosphor-icons/react";
+import { SignOut, Timer } from "@phosphor-icons/react";
 import ConfirmDialog from "../../components/dashboard/ConfirmDialog";
 import Sidebar from "../../components/dashboard/Sidebar";
 import Topbar from "../../components/dashboard/Topbar";
 import { clearAdmin, getAdmin, saveAdmin, type AdminUser } from "../../lib/session";
 import { loadAdminSession, logout } from "../../lib/auth-api";
+import { useIdleSession } from "../../lib/use-idle-session";
 
 export default function DashboardLayout({
   children,
@@ -20,6 +21,7 @@ export default function DashboardLayout({
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [extending, setExtending] = useState(false);
 
   useEffect(() => {
     const a = getAdmin();
@@ -51,13 +53,29 @@ export default function DashboardLayout({
    * nhiều. `window.location.replace` buộc tải lại trang trắng, xoá sạch mọi
    * state/cây component cũ, và không để lại entry trong lịch sử để bấm Back
    * quay lại dashboard.
+   *
+   * `reason="idle"` (tự động đăng xuất do rời máy quá lâu) gắn `?expired=1`
+   * để trang đăng nhập giải thích lý do; bấm "Đăng xuất" chủ động thì không
+   * cần vì admin đã biết rõ mình vừa làm gì.
    */
-  const handleConfirmLogout = useCallback(async () => {
+  const handleConfirmLogout = useCallback(async (reason?: "idle") => {
     setLoggingOut(true);
     await logout(); // xoá cookie httpOnly + thu hồi MỌI token đã phát phía server
     clearAdmin(); // dọn sạch sessionStorage cục bộ
-    window.location.replace("/login");
+    window.location.replace(reason === "idle" ? "/login?expired=1" : "/login");
   }, []);
+
+  const forceLogoutIdle = useCallback(() => {
+    void handleConfirmLogout("idle");
+  }, [handleConfirmLogout]);
+
+  const { warning: idleWarning, secondsLeft, extend } = useIdleSession(forceLogoutIdle);
+
+  const handleExtend = useCallback(async () => {
+    setExtending(true);
+    await extend();
+    setExtending(false);
+  }, [extend]);
 
   if (!checked || !admin) return null;
 
@@ -94,6 +112,22 @@ export default function DashboardLayout({
         busy={loggingOut}
         onConfirm={() => void handleConfirmLogout()}
         onClose={() => !loggingOut && setLogoutConfirmOpen(false)}
+      />
+
+      {/* Cảnh báo không hoạt động — cả hai nút đều là "vẫn đang dùng", cố ý
+          không cho đóng bằng Esc/click nền/nút X mà không xác nhận, để một
+          cú chạm ngoài ý muốn không âm thầm gia hạn phiên hộ người khác. */}
+      <ConfirmDialog
+        open={idleWarning}
+        title="Bạn có còn ở đây không?"
+        description={`Không phát hiện thao tác trong một khoảng thời gian dài. Vì đây là tài khoản quản trị, phiên sẽ tự động đăng xuất sau ${secondsLeft} giây nếu không có phản hồi.`}
+        confirmLabel="Tiếp tục làm việc"
+        cancelLabel="Tôi vẫn ở đây"
+        tone="primary"
+        icon={Timer}
+        busy={extending}
+        onConfirm={() => void handleExtend()}
+        onClose={() => void handleExtend()}
       />
     </>
   );
