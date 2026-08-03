@@ -87,11 +87,23 @@ export async function loginAdmin(
   return data as unknown as { admin: AdminUser };
 }
 
-export async function logout(): Promise<void> {
-  await appFetch(`/admin-auth/logout`, {
-    method: "POST",
-    credentials: "include",
-  }).catch(() => {});
+/**
+ * Gọi backend thu hồi phiên (xoá cookie httpOnly + vô hiệu hoá mọi access/
+ * refresh token đã phát, không chỉ token hiện tại — xem `AdminAuthService`).
+ * Trả `false` khi request thất bại (mất mạng…) — nơi gọi vẫn PHẢI dọn state
+ * cục bộ và điều hướng ra khỏi dashboard, không được để admin kẹt lại màn
+ * hình đã đăng nhập chỉ vì một request thất bại.
+ */
+export async function logout(): Promise<boolean> {
+  try {
+    const res = await appFetch(`/admin-auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**

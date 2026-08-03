@@ -13,9 +13,5 @@ và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, 
 - phải xử lý thế nào nếu seller có đơn nhưng rất lâu vẫn không xác nhận đơn 
 hoặc không bàn giao cho vận chuyển làm buyer chờ đợi mãi mà không làm được gì
 - đảm bảo admin đang thực hiện các tác vụ quan trọng mà không bị logout 
-ra vì quá hạn token, thực hiện các biện pháp bảo mật an toàn và hợp lý đối với admin
-- làm giao diện UI các chức năng sẽ làm trong tương lai trước, cứ phát thảo 
-sơ bộ để sau này phát triển sâu thêm là được, chưa cần đụng tới tính năng 
-thật. Trước khi làm thì suy nghĩ kỹ các tác vụ cần thiết đối với admin và 
-cần thiết cho trang web hiện tại merkovia rồi mới làm, giao diện thân thiện, 
-dễ nhìn, chuyên nghiệp, hiện đại
+ra bất thình lình vì quá hạn token, xem xét kỹ và thực hiện các biện pháp bảo 
+mật an toàn cần thiết và hợp lý đối với admin

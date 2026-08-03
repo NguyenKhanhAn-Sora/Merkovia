@@ -18,8 +18,13 @@ export function saveAdmin(admin: AdminUser) {
   sessionStorage.setItem(ADMIN, JSON.stringify(admin));
 }
 
+/**
+ * Dọn sạch TOÀN BỘ sessionStorage (không chỉ key admin) khi đăng xuất — admin
+ * hiện chỉ lưu đúng một key ở đây, nhưng dọn sạch cả kho phòng trường hợp sau
+ * này có thêm dữ liệu khác lỡ bị bỏ sót khi thêm bước đăng xuất mới.
+ */
 export function clearAdmin() {
-  sessionStorage.removeItem(ADMIN);
+  sessionStorage.clear();
 }
 
 export function getAdmin(): AdminUser | null {
