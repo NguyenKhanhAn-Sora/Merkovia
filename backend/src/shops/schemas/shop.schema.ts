@@ -118,7 +118,13 @@ export class Shop {
   name: string;
 
   /** Handle công khai cho URL shop (merkovia/shop/<slug>). */
-  @Prop({ trim: true, lowercase: true, unique: true, sparse: true, maxlength: 40 })
+  @Prop({
+    trim: true,
+    lowercase: true,
+    unique: true,
+    sparse: true,
+    maxlength: 40,
+  })
   slug?: string;
 
   @Prop({ maxlength: 500 })
@@ -196,6 +202,17 @@ export class Shop {
 
   @Prop({ type: String, enum: SHOP_STATUS, default: 'active', index: true })
   status: ShopStatus;
+
+  /**
+   * Hạn đình chỉ — CÓ giá trị nghĩa là admin đã đình chỉ có thời hạn cụ thể,
+   * hệ thống tự gỡ khi tới hạn (xem `ShopSuspensionService`, dùng BullMQ/Redis
+   * để lên lịch chính xác thay vì chỉ quét định kỳ). `null`/không có nghĩa là
+   * đình chỉ VÔ THỜI HẠN (hoặc shop không bị đình chỉ) — chỉ admin gỡ tay.
+   * Luôn được xoá về `null` khi shop hết đình chỉ, dù gỡ tự động hay admin gỡ
+   * tay, để không còn sót một hạn cũ vô nghĩa khi shop hoạt động lại.
+   */
+  @Prop({ type: Date, default: null, index: true })
+  suspendedUntil?: Date | null;
 
   /** Tài khoản nhận tiền — chưa liên kết thì `undefined`. */
   @Prop({ type: BankAccountSchema })

@@ -22,6 +22,8 @@ export const NOTIF_TYPES = [
   'cancel_rejected',
   'return_approved',
   'return_rejected',
+  /** Đơn bị hệ thống tự huỷ do người bán không xử lý kịp SLA (xem `OrdersService.cancelStaleSellerOrders`). */
+  'order_auto_cancelled',
   // → người bán
   'new_order',
   'order_received',
@@ -30,6 +32,17 @@ export const NOTIF_TYPES = [
   'return_requested',
   'review_received',
   'payout_paid',
+  /** Nhắc sắp quá hạn xác nhận đơn (`pending`). */
+  'order_confirm_reminder',
+  /** Nhắc sắp quá hạn bàn giao vận chuyển (`confirmed`). */
+  'order_ship_reminder',
+  /** Cùng sự kiện với `order_auto_cancelled` nhưng gửi cho người bán để họ biết vì sao mất đơn. */
+  'order_auto_cancelled_seller',
+  /** Admin xử lý báo cáo vi phạm gian hàng — xem `ShopReportsService.resolve`. */
+  'shop_report_warning',
+  'shop_report_suspended',
+  /** Hết hạn đình chỉ (tự động qua `ShopSuspensionService`) hoặc admin gỡ tay sớm. */
+  'shop_suspension_lifted',
 ] as const;
 export type NotifType = (typeof NOTIF_TYPES)[number];
 

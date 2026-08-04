@@ -8,6 +8,8 @@ import {
   renderOtpText,
   renderPasswordResetEmail,
   renderPasswordResetText,
+  renderShopViolationEmail,
+  renderShopViolationText,
 } from './otp-email.template';
 
 @Injectable()
@@ -58,7 +60,10 @@ export class MailService {
       });
       this.logger.log(`Đã gửi OTP đặt lại mật khẩu tới ${to}`);
     } catch (err) {
-      this.logger.error(`Gửi OTP đặt lại mật khẩu tới ${to} thất bại`, err as Error);
+      this.logger.error(
+        `Gửi OTP đặt lại mật khẩu tới ${to} thất bại`,
+        err as Error,
+      );
       throw err;
     }
   }
@@ -80,6 +85,40 @@ export class MailService {
       this.logger.log(`Đã gửi thông báo "không có mật khẩu" tới ${to}`);
     } catch (err) {
       this.logger.error(`Gửi thông báo tới ${to} thất bại`, err as Error);
+      throw err;
+    }
+  }
+
+  /** Báo chủ gian hàng bị admin xử lý (cảnh báo hoặc tạm đình chỉ) sau báo cáo vi phạm. */
+  async sendShopViolationNotice(
+    to: string,
+    params: {
+      shopName: string;
+      action: 'warning' | 'suspend';
+      reasons: string;
+      note: string;
+    },
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: config.smtp.from,
+        to,
+        replyTo: config.smtp.user,
+        subject:
+          params.action === 'suspend'
+            ? `Gian hàng "${params.shopName}" đã bị tạm đình chỉ trên Merkovia`
+            : `Cảnh báo vi phạm cho gian hàng "${params.shopName}" trên Merkovia`,
+        text: renderShopViolationText(params),
+        html: renderShopViolationEmail(params),
+      });
+      this.logger.log(
+        `Đã gửi email xử lý báo cáo (${params.action}) tới ${to}`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Gửi email xử lý báo cáo tới ${to} thất bại`,
+        err as Error,
+      );
       throw err;
     }
   }

@@ -1,0 +1,589 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import {
+  ShopReport,
+  ShopReportDocument,
+  REPORT_SEVERITY,
+  REPORT_REASON_LABEL_VI,
+  ReportReason,
+} from './schemas/shop-report.schema';
+import {
+  CreateShopReportDto,
+  ResolveShopReportDto,
+} from './dto/shop-report.dto';
+import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
+import { Order, OrderDocument } from '../orders/schemas/order.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
+import { NotificationsService } from '../notifications/notifications.service';
+import { MailService } from '../auth/mail.service';
+import { ShopSuspensionService } from './shop-suspension.service';
+import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
+import { config } from '../config/config';
+
+const QUEUE_SCAN_LIMIT = 1000;
+
+/** Một dòng trong hàng đợi ưu tiên xử lý — gộp mọi báo cáo `pending` của một shop. */
+export interface ReportQueueItem {
+  shopId: string;
+  shopName: string;
+  shopSlug?: string;
+  shopStatus: string;
+  /** Số người báo cáo KHÁC NHAU còn đang chờ — mỗi người chỉ tính một lần (xem `priorityQueue`). */
+  reportCount: number;
+  reasons: string[];
+  /** Tổng điểm ưu tiên = Σ (trọng số mức nghiêm trọng × độ tin cậy người báo) — xem `priorityQueue`. */
+  score: number;
+  tier: 'urgent' | 'high' | 'medium' | 'low';
+  oldestReportAt: Date;
+  latestReportAt: Date;
+}
+
+/** Độ tin cậy của MỘT người báo cáo — nhân vào điểm, không dùng để chặn quyền báo cáo. */
+type TrustTier = 'low' | 'regular' | 'trusted';
+interface TrustInfo {
+  weight: number;
+  tier: TrustTier;
+}
+
+/**
+ * Trọng số mức nghiêm trọng theo lý do — đầu vào của điểm ưu tiên. Tách biệt
+ * với `REPORT_SEVERITY` (chỉ phân loại high/medium/low) để có thể tinh chỉnh
+ * độ dốc giữa các mức mà không đổi cách phân loại.
+ */
+const SEVERITY_WEIGHT = { high: 3, medium: 1.6, low: 0.8 } as const;
+
+/**
+ * Trọng số độ tin cậy người báo cáo — nhân vào mức nghiêm trọng khi tính điểm.
+ * KHÔNG dùng để chặn quyền báo cáo (ai cũng báo cáo được), chỉ ảnh hưởng báo
+ * cáo đó góp bao nhiêu vào điểm số của shop. Mục đích: một tài khoản đơn lẻ,
+ * mới tạo, chưa từng mua hàng không thể một mình đẩy một shop lên mức "khẩn
+ * cấp" chỉ bằng một lời tố cáo chưa có gì kiểm chứng — quy mô càng lớn, rủi ro
+ * report giả/report để triệt hạ đối thủ càng cao, nên độ tin cậy PHẢI là một
+ * phần của công thức, không chỉ dựa vào lý do + số lượng thô.
+ */
+const TRUST_BASE = 1;
+const TRUST_AGE_FULL_DAYS = 180; // đủ 180 ngày tuổi tài khoản mới cộng tối đa
+const TRUST_AGE_MAX_BONUS = 0.3;
+const TRUST_VERIFIED_BONUS = 0.15; // đã xác thực email hoặc SĐT
+const TRUST_NO_PURCHASE_PENALTY = -0.3; // chưa từng có đơn giao thành công
+const TRUST_PURCHASE_BONUS = 0.2; // đã có đơn giao thành công
+const TRUST_PURCHASE_BONUS_ACTIVE = 0.35; // >= 5 đơn giao thành công — khách quen
+const TRUST_ACTIVE_ORDER_THRESHOLD = 5;
+// Lịch sử báo cáo CŨ (đã xử lý) của chính người này — tỉ lệ báo cáo dẫn tới
+// hành động thật (resolved) so với bị bỏ qua (dismissed) kéo trọng số lên/xuống.
+// Cần đủ mẫu tối thiểu mới tính, tránh một báo cáo đầu tiên bị từ chối oan đã
+// dìm điểm người dùng.
+const TRUST_TRACK_RECORD_MIN_SAMPLES = 2;
+const TRUST_TRACK_RECORD_SCALE = 1.2; // tỉ lệ 100% chính xác -> +0.6, 0% -> -0.6
+const TRUST_MIN = 0.25;
+const TRUST_MAX = 1.8;
+
+@Injectable()
+export class ShopReportsService {
+  private readonly logger = new Logger(ShopReportsService.name);
+
+  constructor(
+    @InjectModel(ShopReport.name)
+    private readonly reportModel: Model<ShopReportDocument>,
+    @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
+    @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly notifications: NotificationsService,
+    private readonly mail: MailService,
+    private readonly suspension: ShopSuspensionService,
+  ) {}
+
+  /* -------------------------------- Người mua ------------------------------- */
+
+  async create(user: UserDocument, dto: CreateShopReportDto) {
+    if (!Types.ObjectId.isValid(dto.shopId)) {
+      throw new BadRequestException('Gian hàng không hợp lệ.');
+    }
+    const shop = await this.shopModel
+      .findById(dto.shopId)
+      .select('owner')
+      .lean();
+    if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
+    if (String(shop.owner) === String(user._id)) {
+      throw new ForbiddenException(
+        'Bạn không thể báo cáo chính gian hàng của mình.',
+      );
+    }
+
+    // Đơn kèm theo (nếu có) phải đúng là của người gửi VÀ đúng shop đang báo cáo —
+    // chặn giả mạo ngữ cảnh để tăng độ tin cậy cho admin.
+    let orderId: Types.ObjectId | undefined;
+    if (dto.orderId) {
+      if (!Types.ObjectId.isValid(dto.orderId)) {
+        throw new BadRequestException('Đơn hàng không hợp lệ.');
+      }
+      const order = await this.orderModel
+        .findOne({ _id: dto.orderId, buyer: user._id, shop: dto.shopId })
+        .select('_id')
+        .lean();
+      if (order) orderId = order._id;
+    }
+
+    // Chặn spam: đã có báo cáo đang chờ cho shop này thì không gửi thêm cái mới.
+    const dup = await this.reportModel.exists({
+      reporter: user._id,
+      shop: dto.shopId,
+      status: 'pending',
+    });
+    if (dup) {
+      throw new BadRequestException(
+        'Bạn đã gửi báo cáo cho gian hàng này và đang chờ xử lý.',
+      );
+    }
+
+    await this.reportModel.create({
+      reporter: user._id,
+      shop: dto.shopId,
+      reasonType: dto.reasonType,
+      detail: dto.detail?.trim() || undefined,
+      order: orderId,
+      status: 'pending',
+    });
+    return { ok: true };
+  }
+
+  /* --------------------------------- Admin ---------------------------------- */
+
+  /**
+   * Hàng đợi ưu tiên: gộp báo cáo `pending` theo shop, không liệt kê phẳng —
+   * nhiều người cùng báo một shop chỉ chiếm MỘT dòng (kèm số lượng), tránh
+   * loãng hàng đợi khi một shop bị báo cáo dồn dập.
+   *
+   * Xếp theo ĐIỂM (không phải chỉ lý do/số lượng thô): điểm = tổng
+   * (trọng số mức nghiêm trọng × độ tin cậy người báo) trên MỖI NGƯỜI BÁO CÁO
+   * KHÁC NHAU của shop đó. Vì sao không chỉ dựa lý do/số lượng: một tài khoản
+   * đơn lẻ, mới tạo, chưa từng mua hàng, chỉ cần chọn lý do nặng là đẩy ngay
+   * một shop lên mức khẩn cấp — không ổn khi hệ thống lớn hơn (dễ bị lợi dụng
+   * để hại đối thủ). Ngưỡng điểm nằm ở `config.reports.*`.
+   *
+   * Mỗi người báo cáo chỉ đóng góp ĐÚNG MỘT LẦN — báo cáo MỚI NHẤT của họ —
+   * dù về sau có báo cáo lại nhiều lần cho cùng shop (được phép re-file sau
+   * khi báo cáo trước đã bị xử lý). `create()` đã chặn 2 báo cáo `pending`
+   * cùng lúc từ 1 người, đây là lớp phòng vệ THỨ HAI ở tầng tính điểm, không
+   * phụ thuộc hoàn toàn vào ràng buộc lúc ghi.
+   */
+  async priorityQueue(): Promise<ReportQueueItem[]> {
+    const reports = await this.reportModel
+      .find({ status: 'pending' })
+      .sort({ createdAt: 1 })
+      .limit(QUEUE_SCAN_LIMIT)
+      .select('shop reporter reasonType createdAt')
+      .lean();
+    if (reports.length === 0) return [];
+
+    // shopId -> reporterId -> báo cáo MỚI NHẤT của người đó cho shop này.
+    const byShop = new Map<
+      string,
+      Map<string, { reasonType: ReportReason; createdAt: Date }>
+    >();
+    for (const r of reports) {
+      const shopKey = String(r.shop);
+      const reporterKey = String(r.reporter);
+      const createdAt = (r as unknown as { createdAt: Date }).createdAt;
+      let reporters = byShop.get(shopKey);
+      if (!reporters) {
+        reporters = new Map();
+        byShop.set(shopKey, reporters);
+      }
+      const existing = reporters.get(reporterKey);
+      if (!existing || createdAt > existing.createdAt) {
+        reporters.set(reporterKey, { reasonType: r.reasonType, createdAt });
+      }
+    }
+
+    const allReporterIds = [...new Set(reports.map((r) => String(r.reporter)))];
+    const trustMap = await this.computeTrustScores(allReporterIds);
+
+    const shopIds = [...byShop.keys()];
+    const shops = await this.shopModel
+      .find({ _id: { $in: shopIds } })
+      .select('name slug status')
+      .lean();
+    const shopById = new Map(shops.map((s) => [String(s._id), s]));
+
+    const items: ReportQueueItem[] = [];
+    for (const shopId of shopIds) {
+      const shop = shopById.get(shopId);
+      if (!shop) continue; // shop đã bị xoá — không còn gì để xử lý.
+
+      const reportersMap = byShop.get(shopId)!;
+      let score = 0;
+      let oldest: Date | undefined;
+      let latest: Date | undefined;
+      const reasonsSet = new Set<string>();
+      for (const [reporterId, rep] of reportersMap) {
+        const trust = trustMap.get(reporterId);
+        const weight = trust?.weight ?? TRUST_BASE;
+        score += SEVERITY_WEIGHT[REPORT_SEVERITY[rep.reasonType]] * weight;
+        reasonsSet.add(rep.reasonType);
+        if (!oldest || rep.createdAt < oldest) oldest = rep.createdAt;
+        if (!latest || rep.createdAt > latest) latest = rep.createdAt;
+      }
+
+      const tier: ReportQueueItem['tier'] =
+        score >= config.reports.urgentScore
+          ? 'urgent'
+          : score >= config.reports.highScore
+            ? 'high'
+            : score >= config.reports.mediumScore
+              ? 'medium'
+              : 'low';
+
+      items.push({
+        shopId,
+        shopName: shop.name,
+        shopSlug: shop.slug,
+        shopStatus: shop.status,
+        reportCount: reportersMap.size,
+        reasons: [...reasonsSet],
+        score: Math.round(score * 10) / 10,
+        tier,
+        oldestReportAt: oldest!,
+        latestReportAt: latest!,
+      });
+    }
+
+    items.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.oldestReportAt.getTime() - b.oldestReportAt.getTime();
+    });
+    return items;
+  }
+
+  /** Danh sách từng báo cáo (mọi trạng thái) của một shop — cho khay chi tiết. */
+  async listForShop(shopId: string) {
+    if (!Types.ObjectId.isValid(shopId)) {
+      throw new BadRequestException('Gian hàng không hợp lệ.');
+    }
+    const [shop, reports] = await Promise.all([
+      this.shopModel
+        .findById(shopId)
+        .select('name slug status suspendedUntil')
+        .lean(),
+      this.reportModel
+        .find({ shop: shopId })
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .populate<{
+          reporter: { _id: Types.ObjectId; email?: string; phone?: string };
+        }>('reporter', 'email phone')
+        .lean(),
+    ]);
+    if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
+
+    // Độ tin cậy từng người báo cáo — hiển thị kèm để admin cân nhắc, KHÔNG
+    // dùng để tự động loại báo cáo nào (quyết định cuối vẫn là của admin).
+    const reporterIds = [
+      ...new Set(reports.map((r) => String(r.reporter?._id ?? r.reporter))),
+    ];
+    const trustMap = await this.computeTrustScores(reporterIds);
+
+    return {
+      shop: {
+        id: shopId,
+        name: shop.name,
+        slug: shop.slug,
+        status: shop.status,
+        suspendedUntil: shop.suspendedUntil,
+      },
+      reports: reports.map((r) => ({
+        id: String(r._id),
+        reasonType: r.reasonType,
+        reasonLabel: REPORT_REASON_LABEL_VI[r.reasonType],
+        detail: r.detail,
+        status: r.status,
+        reporterContact: r.reporter?.email || r.reporter?.phone || '(ẩn danh)',
+        reporterTrust:
+          trustMap.get(String(r.reporter?._id ?? r.reporter))?.tier ??
+          'regular',
+        orderId: r.order ? String(r.order) : undefined,
+        createdAt: (r as unknown as { createdAt: Date }).createdAt,
+        resolution: r.resolution
+          ? {
+              action: r.resolution.action,
+              note: r.resolution.note,
+              resolvedAt: r.resolution.resolvedAt,
+              resolvedBy: r.resolution.resolvedBy,
+            }
+          : undefined,
+      })),
+    };
+  }
+
+  /**
+   * Xử lý MỘT LẦN cho TẤT CẢ báo cáo `pending` của một shop — admin không xử
+   * từng báo cáo lẻ vì cùng một shop chỉ có một quyết định (cảnh cáo/đình chỉ/
+   * bỏ qua), xử lẻ tẻ chỉ tạo cảm giác đã giải quyết nhưng dữ liệu vẫn rối.
+   */
+  async resolve(
+    admin: AdminPrincipal,
+    shopId: string,
+    dto: ResolveShopReportDto,
+  ) {
+    if (!Types.ObjectId.isValid(shopId)) {
+      throw new BadRequestException('Gian hàng không hợp lệ.');
+    }
+    const shop = await this.shopModel
+      .findById(shopId)
+      .select('owner name status')
+      .exec();
+    if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
+
+    const pending = await this.reportModel.find({
+      shop: shopId,
+      status: 'pending',
+    });
+    if (pending.length === 0) {
+      throw new BadRequestException(
+        'Không còn báo cáo nào đang chờ xử lý cho gian hàng này.',
+      );
+    }
+
+    const resolvedAt = new Date();
+    const resolution = {
+      action: dto.action,
+      note: dto.note?.trim() || undefined,
+      resolvedAt,
+      resolvedBy: admin.id,
+    };
+    const newStatus = dto.action === 'dismiss' ? 'dismissed' : 'resolved';
+    await this.reportModel.updateMany(
+      { _id: { $in: pending.map((p) => p._id) } },
+      { $set: { status: newStatus, resolution } },
+    );
+
+    if (dto.action === 'suspend') {
+      shop.status = 'suspended';
+      // Có `suspendDays` = đình chỉ có hạn, hệ thống tự gỡ (nếu Redis bật).
+      // Không có = đình chỉ vô thời hạn — huỷ mọi lịch gỡ cũ (VD: shop này
+      // từng bị đình chỉ có hạn trước đó rồi tái phạm, giờ đình chỉ hẳn).
+      if (dto.suspendDays) {
+        const unsuspendAt = new Date(Date.now() + dto.suspendDays * 86_400_000);
+        shop.suspendedUntil = unsuspendAt;
+        await shop.save();
+        await this.suspension.schedule(shopId, unsuspendAt);
+      } else {
+        shop.suspendedUntil = null;
+        await shop.save();
+        await this.suspension.cancel(shopId);
+      }
+    }
+
+    // `dismiss` = admin thấy không có vi phạm — im lặng, không cần làm phiền
+    // shop vì một báo cáo mà chính admin đã xác định là không thoả đáng.
+    if (dto.action !== 'dismiss') {
+      const reasons = [...new Set(pending.map((p) => p.reasonType))]
+        .map((r) => REPORT_REASON_LABEL_VI[r])
+        .join(', ');
+      await this.notifyShopOfAction(
+        shop,
+        dto.action,
+        reasons,
+        resolution.note ?? '',
+        dto.action === 'suspend' ? dto.suspendDays : undefined,
+      );
+    }
+
+    return { ok: true, resolvedCount: pending.length };
+  }
+
+  /**
+   * Admin gỡ đình chỉ SỚM, trước hạn (hoặc khi đình chỉ vô thời hạn — cách
+   * DUY NHẤT để gỡ). Huỷ luôn job tự động đang chờ (nếu có) để không bị gỡ
+   * "lần hai" vô nghĩa sau đó.
+   */
+  async unsuspend(admin: AdminPrincipal, shopId: string) {
+    if (!Types.ObjectId.isValid(shopId)) {
+      throw new BadRequestException('Gian hàng không hợp lệ.');
+    }
+    const shop = await this.shopModel.findById(shopId).exec();
+    if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
+    if (shop.status !== 'suspended') {
+      throw new BadRequestException('Gian hàng này hiện không bị đình chỉ.');
+    }
+
+    shop.status = 'active';
+    shop.suspendedUntil = null;
+    await shop.save();
+    await this.suspension.cancel(shopId);
+
+    await this.notifications.notifyUser(shop.owner, 'seller', {
+      type: 'shop_suspension_lifted',
+      title: 'Gian hàng của bạn đã được gỡ đình chỉ',
+      body: `Quản trị viên đã gỡ đình chỉ cho gian hàng "${shop.name}" trước thời hạn. Gian hàng đã hoạt động trở lại bình thường.`,
+      link: '/settings',
+    });
+    this.logger.log(`Admin ${admin.id} đã gỡ đình chỉ sớm cho shop ${shopId}.`);
+
+    return { ok: true };
+  }
+
+  /* -------------------------------- Nội bộ ---------------------------------- */
+
+  /**
+   * Tính độ tin cậy của một nhóm người báo cáo trong MỘT lượt (gộp truy vấn,
+   * không lặp N+1) từ 3 tín hiệu sẵn có, không cần thêm field lưu trữ/đồng bộ:
+   * tuổi tài khoản + đã xác thực, lịch sử mua hàng thật (đơn đã giao thành
+   * công), và độ chính xác của các báo cáo CŨ của chính người đó (bao nhiêu
+   * dẫn tới hành động thật so với bị admin bỏ qua). Tính lại mỗi lần đọc thay
+   * vì lưu điểm cố định — độ tin cậy đổi theo thời gian (mua hàng thêm, có
+   * thêm lịch sử báo cáo chính xác…) và không có gì để đồng bộ khi nó đổi.
+   */
+  private async computeTrustScores(
+    reporterIds: string[],
+  ): Promise<Map<string, TrustInfo>> {
+    const validIds = reporterIds.filter((id) => Types.ObjectId.isValid(id));
+    if (validIds.length === 0) return new Map();
+    const objIds = validIds.map((id) => new Types.ObjectId(id));
+    const now = Date.now();
+
+    const [users, purchaseAgg, trackAgg] = await Promise.all([
+      this.userModel
+        .find({ _id: { $in: objIds } })
+        .select('createdAt emailVerified phoneVerified')
+        .lean(),
+      this.orderModel.aggregate<{ _id: Types.ObjectId; count: number }>([
+        { $match: { buyer: { $in: objIds }, status: 'delivered' } },
+        { $group: { _id: '$buyer', count: { $sum: 1 } } },
+      ]),
+      // Lịch sử báo cáo CŨ (đã xử lý) của chính người này, trên MỌI shop —
+      // không giới hạn shop hiện tại, vì đây là độ tin cậy của NGƯỜI, không
+      // phải của riêng quan hệ người-đó/shop-đó.
+      this.reportModel.aggregate<{
+        _id: { reporter: Types.ObjectId; status: string };
+        count: number;
+      }>([
+        {
+          $match: {
+            reporter: { $in: objIds },
+            status: { $in: ['resolved', 'dismissed'] },
+          },
+        },
+        {
+          $group: {
+            _id: { reporter: '$reporter', status: '$status' },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const purchaseCount = new Map(
+      purchaseAgg.map((p) => [String(p._id), p.count]),
+    );
+    const track = new Map<string, { resolved: number; dismissed: number }>();
+    for (const row of trackAgg) {
+      const key = String(row._id.reporter);
+      const cur = track.get(key) ?? { resolved: 0, dismissed: 0 };
+      if (row._id.status === 'resolved') cur.resolved += row.count;
+      else cur.dismissed += row.count;
+      track.set(key, cur);
+    }
+
+    const result = new Map<string, TrustInfo>();
+    for (const u of users) {
+      const id = String(u._id);
+      const createdAt = (u as unknown as { createdAt: Date }).createdAt;
+      const ageDays = (now - createdAt.getTime()) / 86_400_000;
+      const verified = !!(u.emailVerified || u.phoneVerified);
+      const delivered = purchaseCount.get(id) ?? 0;
+      const t = track.get(id) ?? { resolved: 0, dismissed: 0 };
+      const weight = this.trustWeight({ ageDays, verified, delivered, ...t });
+      result.set(id, { weight, tier: this.trustTier(weight) });
+    }
+    return result;
+  }
+
+  private trustWeight(input: {
+    ageDays: number;
+    verified: boolean;
+    delivered: number;
+    resolved: number;
+    dismissed: number;
+  }): number {
+    let w = TRUST_BASE;
+    w += Math.min(
+      TRUST_AGE_MAX_BONUS,
+      (input.ageDays / TRUST_AGE_FULL_DAYS) * TRUST_AGE_MAX_BONUS,
+    );
+    if (input.verified) w += TRUST_VERIFIED_BONUS;
+    if (input.delivered === 0) w += TRUST_NO_PURCHASE_PENALTY;
+    else if (input.delivered >= TRUST_ACTIVE_ORDER_THRESHOLD)
+      w += TRUST_PURCHASE_BONUS_ACTIVE;
+    else w += TRUST_PURCHASE_BONUS;
+
+    const samples = input.resolved + input.dismissed;
+    if (samples >= TRUST_TRACK_RECORD_MIN_SAMPLES) {
+      const accuracy = input.resolved / samples; // 0..1
+      w += (accuracy - 0.5) * TRUST_TRACK_RECORD_SCALE;
+    }
+    return Math.min(TRUST_MAX, Math.max(TRUST_MIN, w));
+  }
+
+  private trustTier(weight: number): TrustTier {
+    if (weight < 0.75) return 'low';
+    if (weight > 1.3) return 'trusted';
+    return 'regular';
+  }
+
+  private async notifyShopOfAction(
+    shop: ShopDocument,
+    action: 'warning' | 'suspend',
+    reasons: string,
+    note: string,
+    suspendDays?: number,
+  ) {
+    const durationText = suspendDays
+      ? `trong ${suspendDays} ngày (tự động hoạt động lại sau khi hết hạn)`
+      : 'cho đến khi được xem xét lại';
+    const title =
+      action === 'suspend'
+        ? 'Gian hàng của bạn đã bị tạm đình chỉ'
+        : 'Gian hàng của bạn nhận được cảnh báo vi phạm';
+    const body =
+      action === 'suspend'
+        ? `Sau khi xem xét báo cáo từ người mua (${reasons}), gian hàng "${shop.name}" đã bị tạm đình chỉ hoạt động ${durationText}. Lý do: ${note}`
+        : `Sau khi xem xét báo cáo từ người mua (${reasons}), gian hàng "${shop.name}" nhận cảnh báo vi phạm. Lý do: ${note}. Vui lòng khắc phục để tránh bị đình chỉ.`;
+
+    await this.notifications.notifyUser(shop.owner, 'seller', {
+      type:
+        action === 'suspend' ? 'shop_report_suspended' : 'shop_report_warning',
+      title,
+      body,
+      link: '/settings',
+    });
+
+    try {
+      const owner = await this.userModel
+        .findById(shop.owner)
+        .select('email')
+        .lean();
+      if (owner?.email) {
+        await this.mail.sendShopViolationNotice(owner.email, {
+          shopName: shop.name,
+          action,
+          reasons,
+          note: suspendDays ? `${note} (Thời hạn: ${suspendDays} ngày)` : note,
+        });
+      }
+    } catch (err) {
+      // Email chỉ là kênh phụ — thông báo trong app + đổi trạng thái shop đã
+      // đủ để nghiệp vụ đúng, không để lỗi gửi mail chặn luồng xử lý báo cáo.
+      this.logger.warn(
+        `Không gửi được email báo vi phạm cho shop ${shop.id}: ${String(err)}`,
+      );
+    }
+  }
+}

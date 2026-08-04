@@ -96,6 +96,15 @@ const SELLER_CANCELLABLE: readonly OrderStatus[] = ['pending', 'confirmed'];
 /** Số ngày kể từ lúc giao thành công mà người mua còn được yêu cầu trả hàng. */
 const RETURN_WINDOW_DAYS = config.returnWindowDays;
 
+/**
+ * SLA xử lý đơn của người bán (giờ) — xem chú thích ở `config.order` cho lý
+ * do chia hai mốc nhắc/huỷ thay vì cắt cứng một lần.
+ */
+const ORDER_CONFIRM_HOURS = config.order.confirmHours;
+const ORDER_CONFIRM_WARN_HOURS = config.order.confirmWarnHours;
+const ORDER_SHIP_HOURS = config.order.shipHours;
+const ORDER_SHIP_WARN_HOURS = config.order.shipWarnHours;
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -283,6 +292,8 @@ export class OrdersService {
           status: group.status,
           paymentMethod: dto.paymentMethod as PaymentMethod,
           paymentExpiresAt: group.paymentExpiresAt,
+          sellerActionDeadlineAt: group.sellerActionDeadlineAt,
+          sellerActionWarnAt: group.sellerActionWarnAt,
           note: dto.note?.trim(),
           shippingAddress: dto.shippingAddress,
           timeline: [{ status: group.status, at: new Date(), by: 'buyer' }],
@@ -470,6 +481,8 @@ export class OrdersService {
         shipping?: ShippingQuote;
         status: OrderStatus;
         paymentExpiresAt?: Date;
+        sellerActionDeadlineAt?: Date;
+        sellerActionWarnAt?: Date;
       }
     >();
 
@@ -571,6 +584,19 @@ export class OrdersService {
       group.shippingFee = group.shipping.fee;
       group.status = online ? 'pending_payment' : 'pending';
       group.paymentExpiresAt = expiresAt;
+      // Đơn COD vào thẳng `pending` nên hạn xác nhận chốt ngay lúc đặt. Đơn
+      // online chỉ tính hạn khi thật sự vào `pending` — tức đã thanh toán
+      // xong, xem `PaymentService.applyPaid` — chờ ở `pending_payment` không
+      // tính vào SLA của người bán.
+      if (!online) {
+        const now = Date.now();
+        group.sellerActionDeadlineAt = new Date(
+          now + ORDER_CONFIRM_HOURS * 3_600_000,
+        );
+        group.sellerActionWarnAt = new Date(
+          now + ORDER_CONFIRM_WARN_HOURS * 3_600_000,
+        );
+      }
     }
 
     return {
@@ -919,7 +945,12 @@ export class OrdersService {
           : 'Đơn đã bàn giao vận chuyển, không thể huỷ.',
       );
     }
-    const res = await this.cancelOrder(order, 'seller', reason, SELLER_CANCELLABLE);
+    const res = await this.cancelOrder(
+      order,
+      'seller',
+      reason,
+      SELLER_CANCELLABLE,
+    );
     await this.notifications.notifyUser(order.buyer, 'buyer', {
       type: 'order_cancelled_by_seller',
       title: 'Đơn hàng đã bị huỷ',
@@ -965,11 +996,42 @@ export class OrdersService {
       );
     }
 
+    /**
+     * Chuyển tiếp SLA xử lý sang khâu kế tiếp — hoặc dọn hẳn khi không còn
+     * khâu nào chờ người bán chủ động làm:
+     *  - `confirmed`: mở đồng hồ mới cho hạn BÀN GIAO VẬN CHUYỂN, đồng thời
+     *    dọn cờ đã-nhắc của hạn XÁC NHẬN vừa qua để hạn mới có cờ sạch.
+     *  - `shipping`: hàng đã rời tay người bán, không còn SLA nào của họ nữa.
+     */
+    const now = new Date();
+    const slaFields: {
+      sellerActionDeadlineAt: Date | null;
+      sellerActionWarnAt: Date | null;
+      sellerReminderSentAt: null;
+    } | null =
+      next === 'confirmed'
+        ? {
+            sellerActionDeadlineAt: new Date(
+              now.getTime() + ORDER_SHIP_HOURS * 3_600_000,
+            ),
+            sellerActionWarnAt: new Date(
+              now.getTime() + ORDER_SHIP_WARN_HOURS * 3_600_000,
+            ),
+            sellerReminderSentAt: null,
+          }
+        : next === 'shipping'
+          ? {
+              sellerActionDeadlineAt: null,
+              sellerActionWarnAt: null,
+              sellerReminderSentAt: null,
+            }
+          : null;
+
     const res = await this.orderModel.updateOne(
       { _id: order._id, status: order.status },
       {
-        $set: { status: next },
-        $push: { timeline: { status: next, at: new Date(), by: 'seller' } },
+        $set: { status: next, ...slaFields },
+        $push: { timeline: { status: next, at: now, by: 'seller' } },
       },
     );
     if (res.modifiedCount !== 1) {
@@ -1556,6 +1618,13 @@ export class OrdersService {
       paymentMethod: o.paymentMethod,
       paymentExpiresAt: o.paymentExpiresAt,
       paidAt: o.paidAt,
+      /**
+       * Hạn xử lý hiện tại của người bán — `pending` là hạn xác nhận,
+       * `confirmed` là hạn bàn giao vận chuyển; `null`/`undefined` ở các
+       * trạng thái khác. Cả buyer lẫn seller đều cần thấy: buyer để biết khi
+       * nào đơn tự huỷ nếu shop im lặng, seller để biết mình còn bao lâu.
+       */
+      sellerActionDeadlineAt: o.sellerActionDeadlineAt,
       note: o.note,
       cancelledBy: o.cancelledBy,
       cancelReasonType: o.cancelReasonType,
@@ -1664,6 +1733,129 @@ export class OrdersService {
     await this.expireUnpaidOrders().catch((e: unknown) =>
       this.logger.error(`Lỗi khi dọn đơn quá hạn: ${String(e)}`),
     );
+  }
+
+  /* ------------------- Nhắc & tự huỷ đơn người bán bỏ quên ---------------- */
+
+  /**
+   * Nhãn khâu hiện tại của đơn — dùng chung cho cả thông báo nhắc lẫn lý do
+   * huỷ, để hai chỗ không lệch chữ nhau.
+   */
+  private staleStageLabel(status: OrderStatus): string {
+    return status === 'pending' ? 'xác nhận đơn' : 'bàn giao vận chuyển';
+  }
+
+  /**
+   * Bước 1/2 — nhắc người bán khi đơn sắp quá hạn xử lý (xác nhận hoặc bàn
+   * giao vận chuyển, tuỳ trạng thái) mà chưa được nhắc lần nào cho hạn hiện
+   * tại.
+   *
+   * Tách hẳn khỏi bước huỷ và giành quyền bằng `updateOne` điều kiện
+   * `sellerReminderSentAt: null` — cùng khoá lạc quan như `cancelOrder` — để
+   * job chạy nhiều lần chồng nhau (chạy chậm hơn chu kỳ cron) không gửi
+   * trùng một lời nhắc nhiều lần.
+   */
+  async warnStaleSellerOrders(now = new Date()): Promise<number> {
+    const due = await this.orderModel
+      .find({
+        status: { $in: ['pending', 'confirmed'] },
+        sellerActionWarnAt: { $lte: now },
+        sellerReminderSentAt: null,
+      })
+      .limit(200);
+
+    let warned = 0;
+    for (const order of due) {
+      const res = await this.orderModel.updateOne(
+        { _id: order._id, sellerReminderSentAt: null },
+        { $set: { sellerReminderSentAt: now } },
+      );
+      if (res.modifiedCount !== 1) continue; // đã được nhắc bởi lượt chạy khác
+
+      const stage = this.staleStageLabel(order.status);
+      const deadlineText = order.sellerActionDeadlineAt
+        ? new Date(order.sellerActionDeadlineAt).toLocaleString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+          })
+        : '';
+      await this.notifications.notifyShop(order.shop, {
+        type:
+          order.status === 'pending'
+            ? 'order_confirm_reminder'
+            : 'order_ship_reminder',
+        title: `Đơn ${order.orderCode} sắp quá hạn ${stage}`,
+        body: `Vui lòng ${stage} trước ${deadlineText}. Quá hạn mà chưa xử lý, đơn sẽ tự động bị huỷ và hoàn tiền cho khách.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+      warned++;
+    }
+    if (warned) this.logger.log(`Đã nhắc ${warned} đơn sắp quá hạn xử lý.`);
+    return warned;
+  }
+
+  /**
+   * Bước 2/2 — tự huỷ đơn ĐÃ QUA hạn xử lý mà người bán vẫn không làm gì.
+   * Đơn đã được nhắc ở bước 1 trước khi tới được đây (hạn nhắc luôn sớm hơn
+   * hạn huỷ — xem `config.order`), nên đây không phải một cú cắt bất ngờ.
+   *
+   * Dùng lại `cancelOrder` — hoàn kho, đánh dấu hoàn tiền nếu đã trả online —
+   * y hệt mọi đường huỷ khác, chỉ khác người khởi xướng (`system`) và lý do.
+   */
+  async cancelStaleSellerOrders(now = new Date()): Promise<number> {
+    const stale = await this.orderModel
+      .find({
+        status: { $in: ['pending', 'confirmed'] },
+        sellerActionDeadlineAt: { $lte: now },
+      })
+      .limit(200);
+
+    let cancelled = 0;
+    for (const order of stale) {
+      const stage = this.staleStageLabel(order.status);
+      try {
+        await this.cancelOrder(
+          order,
+          'system',
+          `Người bán không ${stage} trong thời hạn quy định`,
+          [order.status],
+        );
+      } catch {
+        continue; // đã bị xử lý ở nơi khác giữa lúc quét (huỷ tay, bàn giao…)
+      }
+
+      await this.notifications.notifyUser(order.buyer, 'buyer', {
+        type: 'order_auto_cancelled',
+        title: 'Đơn hàng đã được tự động huỷ',
+        body: `Gian hàng không phản hồi đơn ${order.orderCode} trong thời hạn quy định nên đơn đã được huỷ${order.paidAt ? ', tiền sẽ được hoàn lại' : ''}.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+      await this.notifications.notifyShop(order.shop, {
+        type: 'order_auto_cancelled_seller',
+        title: 'Đơn hàng đã bị tự động huỷ',
+        body: `Đơn ${order.orderCode} đã tự động huỷ do quá hạn ${stage}. Vui lòng xử lý đơn sớm hơn để tránh mất đơn hàng trong tương lai.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+      cancelled++;
+    }
+    if (cancelled) {
+      this.logger.log(
+        `Đã tự huỷ ${cancelled} đơn quá hạn xử lý của người bán.`,
+      );
+    }
+    return cancelled;
+  }
+
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async handleStaleSellerOrders() {
+    try {
+      await this.warnStaleSellerOrders();
+      await this.cancelStaleSellerOrders();
+    } catch (err: unknown) {
+      this.logger.error(`Lỗi khi xử lý đơn treo ở người bán: ${String(err)}`);
+    }
   }
 }
 

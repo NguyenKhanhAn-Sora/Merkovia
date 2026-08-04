@@ -36,6 +36,8 @@ import { config } from '../config/config';
   // `AuthService` mở ra cho `AccountModule` dùng chung một kho OTP: đổi số
   // điện thoại trong trang Tài khoản phải đi qua đúng bộ đếm số lần nhập sai
   // và cooldown gửi lại như lúc đăng ký, không dựng một luồng OTP thứ hai.
-  exports: [AccountService, AuthService, JwtAuthGuard],
+  // `MailService` mở ra cho các module cần gửi email nghiệp vụ khác (báo cáo
+  // vi phạm gian hàng…) mà không phải tự dựng lại transporter.
+  exports: [AccountService, AuthService, JwtAuthGuard, MailService],
 })
 export class AuthModule {}

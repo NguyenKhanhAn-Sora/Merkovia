@@ -9,6 +9,8 @@ chính sách không
 - giờ đã làm trang người bán và người mua rồi, còn trung gian thì sao chúng 
 ta phải giải quyết thế nào, kiểu như trung gian là người lấy hàng giao hàng 
 và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, có cần làm 1 app riêng không?
-- có nên làm chức năng report 1 store nào đó hoặc 1 buyer nào đó không, ý kiến của bạn thế nao?
-- phải xử lý thế nào nếu seller có đơn nhưng rất lâu vẫn không xác nhận đơn 
-hoặc không bàn giao cho vận chuyển làm buyer chờ đợi mãi mà không làm được gì
+- có nên làm chức năng report 1 buyer nào đó không, ý kiến của bạn thế nao?
+- khi đình chỉ seller tạm thời thì nên có thêm tính năng đình chỉ bao nhiêu 
+ngày, khi admin đình chỉ số ngày cụ thể thì tới ngày đó seller tự động gỡ 
+hình phạt để giảm tải công việc cho admin, tôi nghĩ đây là lúc nên tích hợp 
+redis cloud cho các tác vụ schedule

@@ -583,6 +583,7 @@ export class AccountService {
         slug: shop.slug,
         logoUrl: shop.logoUrl,
         status: shop.status,
+        suspendedUntil: shop.suspendedUntil,
         description: shop.description,
         category: shop.category,
         businessType: shop.businessType,

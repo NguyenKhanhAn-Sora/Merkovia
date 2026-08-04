@@ -231,8 +231,49 @@ export const config = {
    */
   reviewEditWindowHours: optionalNumber('REVIEW_EDIT_WINDOW_HOURS', 48),
 
+  /**
+   * SLA xử lý đơn của người bán — hai mốc mỗi khâu để tránh huỷ oan một đơn
+   * chậm trễ ngắn hạn (cuối tuần, đơn dồn): nhắc nhở ở `*WarnHours`, chỉ tự
+   * huỷ nếu vẫn không xử lý tới `*Hours`. Áp cho hai khâu người bán CHỦ ĐỘNG
+   * làm — xác nhận đơn (`pending`→`confirmed`) và bàn giao vận chuyển
+   * (`confirmed`→`shipping`) — xem `OrdersService.handleStaleSellerOrders`.
+   *
+   * 🔴 `*WarnHours` PHẢI nhỏ hơn `*Hours` — job nhắc chạy trước job huỷ trong
+   * cùng một lượt quét, đặt sai thứ tự thì đơn bị huỷ mà chưa từng được nhắc.
+   */
+  order: {
+    confirmHours: optionalNumber('ORDER_CONFIRM_HOURS', 48),
+    confirmWarnHours: optionalNumber('ORDER_CONFIRM_WARN_HOURS', 36),
+    shipHours: optionalNumber('ORDER_SHIP_HOURS', 72),
+    shipWarnHours: optionalNumber('ORDER_SHIP_WARN_HOURS', 48),
+  },
+
+  /**
+   * Ngưỡng ĐIỂM (không phải số lượng thô) để xếp bậc ưu tiên xử lý báo cáo vi
+   * phạm gian hàng. Điểm = tổng (trọng số mức nghiêm trọng × độ tin cậy người
+   * báo cáo) trên mọi báo cáo đang chờ của một shop — xem
+   * `ShopReportsService.priorityQueue`. Tách thành config để tăng/giảm độ
+   * nhạy mà không phải sửa code khi quy mô người dùng thay đổi.
+   */
+  reports: {
+    urgentScore: optionalNumber('REPORT_URGENT_SCORE', 4),
+    highScore: optionalNumber('REPORT_HIGH_SCORE', 2.2),
+    mediumScore: optionalNumber('REPORT_MEDIUM_SCORE', 1),
+  },
+
   // Lưu trữ media — Cloudflare R2 (S3-compatible). Optional để app vẫn boot
   // khi chưa cấu hình; endpoint upload sẽ báo lỗi rõ ràng nếu thiếu.
+  /**
+   * Redis Cloud — dùng để LÊN LỊCH tác vụ chạy tại một thời điểm cụ thể trong
+   * tương lai (hiện tại: tự động gỡ đình chỉ gian hàng khi hết hạn, xem
+   * `ShopSuspensionService`). Để trống thì tính năng TỰ TẮT: admin vẫn đình
+   * chỉ có thời hạn được, nhưng phải tự gỡ tay khi hết hạn thay vì hệ thống
+   * tự làm — không lỗi, không chặn boot, giống triết lý của `goong`/`gemini`.
+   */
+  redis: {
+    url: optional('REDIS_URL', ''),
+  },
+
   r2: {
     accountId: optional('R2_ACCOUNT_ID', ''),
     accessKeyId: optional('R2_ACCESS_KEY_ID', ''),

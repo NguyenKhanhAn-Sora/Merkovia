@@ -1,6 +1,7 @@
 import {
   ChartLineUp,
   ClockCounterClockwise,
+  Flag,
   Gear,
   Megaphone,
   Package,
@@ -32,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Tổng quan", icon: ChartLineUp, group: "Tổng quan" },
   { href: "/users", label: "Người dùng", icon: Users, group: "Vận hành sàn" },
   { href: "/shops", label: "Gian hàng", icon: Storefront, group: "Vận hành sàn" },
+  { href: "/reports", label: "Báo cáo", icon: Flag, group: "Vận hành sàn" },
   { href: "/products", label: "Sản phẩm", icon: Package, group: "Vận hành sàn" },
   { href: "/categories", label: "Danh mục", icon: Tag, group: "Vận hành sàn" },
   { href: "/orders", label: "Đơn hàng", icon: Receipt, group: "Vận hành sàn" },

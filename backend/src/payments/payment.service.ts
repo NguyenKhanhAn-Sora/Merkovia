@@ -306,10 +306,24 @@ export class PaymentService {
     }
 
     // Chỉ đơn CÒN chờ thanh toán mới được chuyển tiếp.
+    // Đơn vừa vào `pending` bắt đầu tính SLA xác nhận của người bán — không
+    // tính từ lúc đặt (còn ở `pending_payment` chờ tiền không phải lỗi của
+    // người bán) mà từ lúc thật sự vào hàng đợi xử lý, đối xứng với đơn COD
+    // (xem `buildGroups`, hạn chốt ngay lúc đặt vì COD vào thẳng `pending`).
+    const paidNow = new Date();
     const applied = await this.orderModel.updateMany(
       { _id: { $in: payment.orders }, status: 'pending_payment' },
       {
-        $set: { status: 'pending', paidAt: new Date() },
+        $set: {
+          status: 'pending',
+          paidAt: paidNow,
+          sellerActionDeadlineAt: new Date(
+            paidNow.getTime() + config.order.confirmHours * 3_600_000,
+          ),
+          sellerActionWarnAt: new Date(
+            paidNow.getTime() + config.order.confirmWarnHours * 3_600_000,
+          ),
+        },
         $unset: { paymentExpiresAt: '' },
         $push: {
           timeline: {

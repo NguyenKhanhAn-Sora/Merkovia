@@ -422,6 +422,29 @@ export class Order {
   @Prop({ type: Types.ObjectId, ref: 'Payment', index: true })
   payment?: Types.ObjectId;
 
+  /* ------------------------- SLA xử lý của người bán --------------------- */
+  /**
+   * Hạn xử lý HIỆN TẠI của người bán cho đơn này — ý nghĩa đổi theo trạng
+   * thái: đơn `pending` thì đây là hạn XÁC NHẬN, đơn `confirmed` thì đây là
+   * hạn BÀN GIAO VẬN CHUYỂN. Quá hạn mà chưa xử lý → job tự huỷ (xem
+   * `OrdersService.cancelStaleSellerOrders`).
+   *
+   * Dùng chung MỘT cặp trường cho cả hai mốc vì một đơn không bao giờ chờ cả
+   * hai việc cùng lúc — tránh nhân đôi trường mà chỉ một nửa có ý nghĩa tại
+   * bất kỳ thời điểm nào. `null` nghĩa là đơn không còn (hoặc chưa) chờ người
+   * bán chủ động làm gì (đã bàn giao vận chuyển, đã huỷ…).
+   */
+  @Prop({ type: Date, index: true })
+  sellerActionDeadlineAt?: Date | null;
+
+  /** Mốc nhắc nhở — sớm hơn `sellerActionDeadlineAt`, cho người bán thời gian phản ứng trước khi bị huỷ. */
+  @Prop({ type: Date, index: true })
+  sellerActionWarnAt?: Date | null;
+
+  /** Đã gửi nhắc cho hạn hiện tại chưa — chặn cron nhắc trùng mỗi lượt quét. */
+  @Prop({ type: Date })
+  sellerReminderSentAt?: Date | null;
+
   /* ------------------------------ Chi trả ------------------------------- */
   /** Mốc giao thành công — gốc để tính thời gian giữ tiền trước khi chi trả. */
   @Prop({ index: true })

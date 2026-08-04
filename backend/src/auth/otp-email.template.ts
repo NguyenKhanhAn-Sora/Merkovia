@@ -108,7 +108,10 @@ function shell(preheader: string, body: string): string {
 }
 
 /** Email chứa OTP để ĐẶT LẠI MẬT KHẨU. */
-export function renderPasswordResetEmail(code: string, ttlMinutes: number): string {
+export function renderPasswordResetEmail(
+  code: string,
+  ttlMinutes: number,
+): string {
   return shell(
     'Mã xác thực để đặt lại mật khẩu Merkovia.',
     `<tr>
@@ -139,7 +142,10 @@ export function renderPasswordResetEmail(code: string, ttlMinutes: number): stri
   );
 }
 
-export function renderPasswordResetText(code: string, ttlMinutes: number): string {
+export function renderPasswordResetText(
+  code: string,
+  ttlMinutes: number,
+): string {
   return [
     'Xin chào,',
     '',
@@ -188,6 +194,78 @@ export function renderNoPasswordText(method: string): string {
     `Bạn chỉ cần vào trang đăng nhập và chọn ${method}.`,
     '',
     'Nếu bạn không yêu cầu, hãy bỏ qua email này.',
+    '',
+    'Trân trọng,',
+    'Đội ngũ Merkovia',
+  ].join('\n');
+}
+
+/** Email báo gian hàng bị xử lý sau khi admin xem xét báo cáo vi phạm. */
+export function renderShopViolationEmail(params: {
+  shopName: string;
+  action: 'warning' | 'suspend';
+  reasons: string;
+  note: string;
+}): string {
+  const { shopName, action, reasons, note } = params;
+  const isSuspend = action === 'suspend';
+  return shell(
+    isSuspend
+      ? `Gian hàng "${shopName}" đã bị tạm đình chỉ.`
+      : `Gian hàng "${shopName}" nhận cảnh báo vi phạm.`,
+    `<tr>
+      <td style="padding:20px 32px 0;">
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;">Xin chào,</p>
+        <p style="margin:0 0 8px;font-size:15px;line-height:1.6;">
+          Đội ngũ Merkovia đã xem xét các báo cáo vi phạm liên quan đến gian hàng
+          <strong>${shopName}</strong> (lý do được báo: ${reasons}) và đưa ra quyết định:
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:12px 32px 0;">
+        <div style="border-radius:10px;padding:14px 18px;background:${isSuspend ? '#fef2f2' : '#fffbeb'};border:1px solid ${isSuspend ? '#fecaca' : '#fde68a'};">
+          <p style="margin:0;font-size:14px;font-weight:700;color:${isSuspend ? '#b91c1c' : '#92400e'};">
+            ${isSuspend ? 'Tạm đình chỉ hoạt động gian hàng' : 'Cảnh báo vi phạm'}
+          </p>
+          <p style="margin:8px 0 0;font-size:14px;line-height:1.6;color:#4b5563;">${note}</p>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:16px 32px 0;">
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#4b5563;">
+          ${
+            isSuspend
+              ? 'Gian hàng tạm thời không thể đăng bán sản phẩm mới hoặc nhận thanh toán cho đến khi được xem xét lại. Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
+              : 'Đây là cảnh báo — gian hàng vẫn hoạt động bình thường. Vui lòng khắc phục vấn đề trên để tránh bị tạm đình chỉ trong các lần vi phạm tiếp theo.'
+          }
+        </p>
+      </td>
+    </tr>`,
+  );
+}
+
+export function renderShopViolationText(params: {
+  shopName: string;
+  action: 'warning' | 'suspend';
+  reasons: string;
+  note: string;
+}): string {
+  const { shopName, action, reasons, note } = params;
+  const isSuspend = action === 'suspend';
+  return [
+    'Xin chào,',
+    '',
+    `Đội ngũ Merkovia đã xem xét các báo cáo vi phạm liên quan đến gian hàng "${shopName}" (lý do được báo: ${reasons}).`,
+    isSuspend
+      ? 'Quyết định: TẠM ĐÌNH CHỈ hoạt động gian hàng.'
+      : 'Quyết định: CẢNH BÁO vi phạm.',
+    `Chi tiết: ${note}`,
+    '',
+    isSuspend
+      ? 'Gian hàng tạm thời không thể đăng bán sản phẩm mới hoặc nhận thanh toán. Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
+      : 'Gian hàng vẫn hoạt động bình thường. Vui lòng khắc phục vấn đề để tránh bị tạm đình chỉ trong các lần vi phạm tiếp theo.',
     '',
     'Trân trọng,',
     'Đội ngũ Merkovia',
