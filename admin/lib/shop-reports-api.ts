@@ -63,6 +63,26 @@ export interface ShopReportItem {
   };
 }
 
+export const REPORT_ACTION_LABEL: Record<ReportAction, string> = {
+  warning: "Cảnh cáo",
+  suspend: "Tạm đình chỉ",
+  dismiss: "Bỏ qua",
+};
+
+/** Một dòng trong lịch sử xử lý — shop đã có quyết định, kèm quyết định gần nhất. */
+export interface ReportHistoryItem {
+  shopId: string;
+  shopName: string;
+  shopSlug?: string;
+  shopStatus: "pending" | "active" | "suspended";
+  suspendedUntil?: string | null;
+  lastAction: ReportAction;
+  lastActionNote?: string;
+  lastActionAt: string;
+  lastActionBy: string;
+  totalReports: number;
+}
+
 export interface ShopReportsDetail {
   shop: {
     id: string;
@@ -88,6 +108,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getReportQueue(): Promise<ReportQueueItem[]> {
   return request("/admin/shop-reports");
+}
+
+/** Lịch sử xử lý — kể cả shop đã hết báo cáo đang chờ (lối vào để gỡ đình chỉ vô thời hạn). */
+export function getReportHistory(): Promise<ReportHistoryItem[]> {
+  return request("/admin/shop-reports/history");
 }
 
 export function getShopReports(shopId: string): Promise<ShopReportsDetail> {

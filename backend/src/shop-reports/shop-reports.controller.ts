@@ -35,6 +35,12 @@ export class AdminShopReportsController {
     return this.shopReports.priorityQueue();
   }
 
+  /** Lịch sử xử lý — shop đã có quyết định (kể cả đã hết báo cáo đang chờ). */
+  @Get('history')
+  history() {
+    return this.shopReports.resolvedHistory();
+  }
+
   @Get('shop/:shopId')
   listForShop(@Param('shopId') shopId: string) {
     return this.shopReports.listForShop(shopId);

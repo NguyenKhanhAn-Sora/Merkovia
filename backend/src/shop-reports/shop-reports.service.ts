@@ -45,6 +45,21 @@ export interface ReportQueueItem {
   latestReportAt: Date;
 }
 
+/** Một dòng trong lịch sử xử lý — một shop từng bị xử lý, kèm quyết định gần nhất. */
+export interface ReportHistoryItem {
+  shopId: string;
+  shopName: string;
+  shopSlug?: string;
+  shopStatus: string;
+  suspendedUntil?: Date | null;
+  lastAction: 'warning' | 'suspend' | 'dismiss';
+  lastActionNote?: string;
+  lastActionAt: Date;
+  lastActionBy: string;
+  /** Tổng số báo cáo (mọi trạng thái, mọi thời điểm) shop này từng nhận. */
+  totalReports: number;
+}
+
 /** Độ tin cậy của MỘT người báo cáo — nhân vào điểm, không dùng để chặn quyền báo cáo. */
 type TrustTier = 'low' | 'regular' | 'trusted';
 interface TrustInfo {
@@ -260,6 +275,79 @@ export class ShopReportsService {
       return a.oldestReportAt.getTime() - b.oldestReportAt.getTime();
     });
     return items;
+  }
+
+  /**
+   * Lịch sử xử lý — shop từng có báo cáo được admin xử lý (`resolved`/`dismissed`),
+   * mỗi shop một dòng với quyết định GẦN NHẤT, mới nhất lên trước.
+   *
+   * 🔴 Đây là lối vào DUY NHẤT để mở lại một shop đã hết báo cáo `pending` —
+   * `priorityQueue()` chỉ liệt kê shop còn báo cáo đang chờ, nên một shop bị
+   * đình chỉ VÔ THỜI HẠN rồi biến mất khỏi hàng đợi (không còn gì đang chờ) sẽ
+   * không còn cách nào gỡ đình chỉ nếu thiếu trang này — admin cần tìm lại nó
+   * ở đây để mở khay chi tiết (có sẵn nút "Gỡ đình chỉ ngay").
+   */
+  async resolvedHistory(): Promise<ReportHistoryItem[]> {
+    const reports = await this.reportModel
+      .find({ status: { $in: ['resolved', 'dismissed'] } })
+      .sort({ 'resolution.resolvedAt': -1 })
+      .limit(QUEUE_SCAN_LIMIT)
+      .select('shop resolution')
+      .lean();
+    if (reports.length === 0) return [];
+
+    // Giữ QUYẾT ĐỊNH GẦN NHẤT của mỗi shop — đã sort mới-nhất-trước nên bản
+    // ghi đầu tiên gặp cho mỗi shop chính là bản mới nhất.
+    const latestByShop = new Map<
+      string,
+      NonNullable<(typeof reports)[number]['resolution']>
+    >();
+    for (const r of reports) {
+      const key = String(r.shop);
+      if (!latestByShop.has(key) && r.resolution)
+        latestByShop.set(key, r.resolution);
+    }
+    const shopIds = [...latestByShop.keys()];
+
+    const [shops, totalCounts] = await Promise.all([
+      this.shopModel
+        .find({ _id: { $in: shopIds } })
+        .select('name slug status suspendedUntil')
+        .lean(),
+      this.reportModel.aggregate<{ _id: Types.ObjectId; count: number }>([
+        {
+          $match: {
+            shop: { $in: shopIds.map((id) => new Types.ObjectId(id)) },
+          },
+        },
+        { $group: { _id: '$shop', count: { $sum: 1 } } },
+      ]),
+    ]);
+    const shopById = new Map(shops.map((s) => [String(s._id), s]));
+    const totalByShop = new Map(
+      totalCounts.map((c) => [String(c._id), c.count]),
+    );
+
+    return shopIds
+      .filter((id) => shopById.has(id))
+      .map((shopId) => {
+        const shop = shopById.get(shopId)!;
+        const resolution = latestByShop.get(shopId)!;
+        const item: ReportHistoryItem = {
+          shopId,
+          shopName: shop.name,
+          shopSlug: shop.slug,
+          shopStatus: shop.status,
+          suspendedUntil: shop.suspendedUntil,
+          lastAction: resolution.action,
+          lastActionNote: resolution.note,
+          lastActionAt: resolution.resolvedAt,
+          lastActionBy: resolution.resolvedBy,
+          totalReports: totalByShop.get(shopId) ?? 0,
+        };
+        return item;
+      })
+      .sort((a, b) => b.lastActionAt.getTime() - a.lastActionAt.getTime());
   }
 
   /** Danh sách từng báo cáo (mọi trạng thái) của một shop — cho khay chi tiết. */
