@@ -75,7 +75,7 @@ export class FavoritesService {
           path: 'product',
           select:
             'name slug images priceMin priceMax totalStock status deletedAt stats activeDeal shop',
-          populate: { path: 'shop', select: 'name slug' },
+          populate: { path: 'shop', select: 'name slug status vacationMode' },
         }),
       this.favoriteModel.countDocuments(filter),
     ]);
@@ -86,7 +86,13 @@ export class FavoritesService {
         // Sản phẩm đã bị xoá hẳn → populate trả null. Bỏ khỏi danh sách chứ
         // không làm vỡ trang.
         if (!p) return null;
-        const shop = p.shop as unknown as { name?: string; slug?: string };
+        const shop = p.shop as unknown as {
+          name?: string;
+          slug?: string;
+          status?: string;
+          vacationMode?: boolean;
+        };
+        const shopOpen = shop?.status === 'active' && !shop.vacationMode;
         return {
           id: String(p._id),
           slug: p.slug,
@@ -99,8 +105,9 @@ export class FavoritesService {
           ratingAvg: p.stats?.ratingAvg ?? 0,
           ratingCount: p.stats?.ratingCount ?? 0,
           shop: { name: shop?.name, slug: shop?.slug },
-          /** Còn mua được không — hàng đã gỡ vẫn hiện nhưng mờ đi. */
-          available: p.status === 'active' && !p.deletedAt,
+          /** Còn mua được không — hàng đã gỡ hoặc gian hàng tạm nghỉ/bị đình
+           *  chỉ vẫn hiện nhưng mờ đi, khớp điều kiện chặn lúc đặt hàng. */
+          available: p.status === 'active' && !p.deletedAt && shopOpen,
         };
       })
       .filter(Boolean);

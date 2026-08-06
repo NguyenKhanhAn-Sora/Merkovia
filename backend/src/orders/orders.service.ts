@@ -43,6 +43,25 @@ import { shortId } from '../common/text';
 import { config } from '../config/config';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { UserDocument } from '../users/schemas/user.schema';
+import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
+
+/**
+ * Một yêu cầu huỷ/trả hàng đang chờ của gian hàng ĐANG BỊ ĐÌNH CHỈ — cần admin
+ * xử lý thay vì để shop tự duyệt (shop đang bị đình chỉ có động cơ từ chối
+ * để giữ tiền, xung đột lợi ích trực tiếp với chính yêu cầu đang xét).
+ */
+export interface OrderDisputeItem {
+  orderId: string;
+  orderCode: string;
+  shopId: string;
+  shopName: string;
+  type: 'cancel' | 'return';
+  reasonType?: string;
+  reason?: string;
+  requestedAt: Date;
+  buyerContact: string;
+  total: number;
+}
 
 /**
  * Phần giỏ hàng mà `buildGroups` thực sự cần.
@@ -890,10 +909,68 @@ export class OrdersService {
     approve: boolean,
     note?: string,
   ) {
-    const order = await this.findOwnedByShop(user, id);
+    const shop = await this.requireShop(user);
+    // Shop đang bị đình chỉ có động cơ từ chối để giữ tiền — xung đột lợi ích
+    // trực tiếp. Admin xử lý thay (xem `adminRespondCancelRequest`).
+    if (shop.status === 'suspended') {
+      throw new ForbiddenException(
+        'Gian hàng đang bị đình chỉ nên không thể tự xử lý yêu cầu huỷ — quản trị viên sẽ xem xét và quyết định thay.',
+      );
+    }
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Không tìm thấy đơn hàng.');
+    }
+    const order = await this.orderModel.findOne({ _id: id, shop: shop._id });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng.');
+    return this.resolveCancelRequest(order, approve, note, 'seller');
+  }
+
+  /**
+   * Admin xử lý yêu cầu huỷ THAY cho một gian hàng đang bị đình chỉ. Chỉ hoạt
+   * động khi shop CÒN đang `suspended` — với shop bình thường, quyết định vẫn
+   * thuộc về chính họ qua `respondCancelRequest`, admin không tự tiện can
+   * thiệp vào quan hệ mua-bán khi không có lý do.
+   */
+  async adminRespondCancelRequest(
+    admin: AdminPrincipal,
+    id: string,
+    approve: boolean,
+    note?: string,
+  ) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Không tìm thấy đơn hàng.');
+    }
+    const order = await this.orderModel.findById(id);
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng.');
+    const shop = await this.shopModel
+      .findById(order.shop)
+      .select('status')
+      .lean();
+    if (!shop || shop.status !== 'suspended') {
+      throw new BadRequestException(
+        'Chỉ xử lý thay được yêu cầu của gian hàng đang bị đình chỉ.',
+      );
+    }
+    this.logger.log(
+      `Admin ${admin.id} xử lý yêu cầu huỷ đơn ${order.orderCode} thay gian hàng đang bị đình chỉ.`,
+    );
+    return this.resolveCancelRequest(order, approve, note, 'admin');
+  }
+
+  /** Logic chung cho duyệt/từ chối yêu cầu huỷ — dùng chung bởi seller và admin. */
+  private async resolveCancelRequest(
+    order: OrderDocument,
+    approve: boolean,
+    note: string | undefined,
+    resolvedBy: 'seller' | 'admin',
+  ) {
     if (order.cancelRequest?.status !== 'pending') {
       throw new BadRequestException('Đơn này không có yêu cầu huỷ đang chờ.');
     }
+    const actorLabel =
+      resolvedBy === 'admin'
+        ? 'Quản trị viên (thay cho gian hàng đang bị đình chỉ)'
+        : 'Người bán';
 
     if (!approve) {
       order.cancelRequest.status = 'rejected';
@@ -904,7 +981,7 @@ export class OrdersService {
       await this.notifications.notifyUser(order.buyer, 'buyer', {
         type: 'cancel_rejected',
         title: 'Yêu cầu huỷ bị từ chối',
-        body: `Người bán không đồng ý huỷ đơn ${order.orderCode}.`,
+        body: `${actorLabel} không đồng ý huỷ đơn ${order.orderCode}.`,
         link: `/orders/${String(order._id)}`,
         data: { orderId: String(order._id), orderCode: order.orderCode },
       });
@@ -921,14 +998,14 @@ export class OrdersService {
 
     const res = await this.cancelOrder(
       order,
-      'buyer', // người mua mới là bên muốn huỷ; người bán chỉ chấp thuận
+      'buyer', // người mua mới là bên muốn huỷ; người duyệt chỉ chấp thuận
       order.cancelRequest.reason || 'Người mua yêu cầu huỷ',
       SELLER_CANCELLABLE,
     );
     await this.notifications.notifyUser(order.buyer, 'buyer', {
       type: 'cancel_approved',
       title: 'Đơn đã được huỷ',
-      body: `Người bán đã đồng ý huỷ đơn ${order.orderCode}.`,
+      body: `${actorLabel} đã đồng ý huỷ đơn ${order.orderCode}.`,
       link: `/orders/${String(order._id)}`,
       data: { orderId: String(order._id), orderCode: order.orderCode },
     });
@@ -1286,12 +1363,68 @@ export class OrdersService {
     approve: boolean,
     note?: string,
   ) {
-    const order = await this.findOwnedByShop(user, id);
+    const shop = await this.requireShop(user);
+    if (shop.status === 'suspended') {
+      throw new ForbiddenException(
+        'Gian hàng đang bị đình chỉ nên không thể tự xử lý yêu cầu trả hàng — quản trị viên sẽ xem xét và quyết định thay.',
+      );
+    }
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Không tìm thấy đơn hàng.');
+    }
+    const order = await this.orderModel.findOne({ _id: id, shop: shop._id });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng.');
+    return this.resolveReturnRequest(order, approve, note, 'seller');
+  }
+
+  /** Admin xử lý yêu cầu trả hàng THAY cho một gian hàng đang bị đình chỉ — xem `adminRespondCancelRequest`. */
+  async adminRespondReturn(
+    admin: AdminPrincipal,
+    id: string,
+    approve: boolean,
+    note?: string,
+  ) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Không tìm thấy đơn hàng.');
+    }
+    const order = await this.orderModel.findById(id);
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng.');
+    const shop = await this.shopModel
+      .findById(order.shop)
+      .select('status')
+      .lean();
+    if (!shop || shop.status !== 'suspended') {
+      throw new BadRequestException(
+        'Chỉ xử lý thay được yêu cầu của gian hàng đang bị đình chỉ.',
+      );
+    }
+    this.logger.log(
+      `Admin ${admin.id} xử lý yêu cầu trả hàng đơn ${order.orderCode} thay gian hàng đang bị đình chỉ.`,
+    );
+    return this.resolveReturnRequest(order, approve, note, 'admin');
+  }
+
+  /**
+   * Logic chung cho duyệt/từ chối yêu cầu trả hàng — dùng chung bởi seller và
+   * admin. Duyệt = chấp nhận trả và HOÀN TIỀN cho người mua: đơn sang
+   * `returned`, trừ lượt bán, ghi nghĩa vụ hoàn tiền. KHÔNG tự cộng lại tồn
+   * kho — hàng trả về có thể đã hư/đã dùng, người kiểm rồi tự chỉnh kho.
+   */
+  private async resolveReturnRequest(
+    order: OrderDocument,
+    approve: boolean,
+    note: string | undefined,
+    resolvedBy: 'seller' | 'admin',
+  ) {
     if (order.returnRequest?.status !== 'requested') {
       throw new BadRequestException(
         'Đơn này không có yêu cầu trả hàng đang chờ.',
       );
     }
+    const actorLabel =
+      resolvedBy === 'admin'
+        ? 'Quản trị viên (thay cho gian hàng đang bị đình chỉ)'
+        : 'Người bán';
 
     if (!approve) {
       order.returnRequest.status = 'rejected';
@@ -1302,7 +1435,7 @@ export class OrdersService {
       await this.notifications.notifyUser(order.buyer, 'buyer', {
         type: 'return_rejected',
         title: 'Yêu cầu trả hàng bị từ chối',
-        body: `Người bán không đồng ý trả hàng cho đơn ${order.orderCode}.`,
+        body: `${actorLabel} không đồng ý trả hàng cho đơn ${order.orderCode}.`,
         link: `/orders/${String(order._id)}`,
         data: { orderId: String(order._id), orderCode: order.orderCode },
       });
@@ -1329,8 +1462,12 @@ export class OrdersService {
           timeline: {
             status: 'returned',
             at: now,
-            by: 'seller',
-            note: note?.trim() || 'Đồng ý trả hàng',
+            by: resolvedBy,
+            note:
+              note?.trim() ||
+              (resolvedBy === 'admin'
+                ? 'Quản trị viên đồng ý trả hàng'
+                : 'Đồng ý trả hàng'),
           },
         },
       },
@@ -1365,13 +1502,82 @@ export class OrdersService {
     await this.notifications.notifyUser(order.buyer, 'buyer', {
       type: 'return_approved',
       title: 'Yêu cầu trả hàng được chấp nhận',
-      body: `Người bán đồng ý trả hàng đơn ${order.orderCode}. Tiền ${order.total.toLocaleString('vi-VN')}đ sẽ được hoàn cho bạn.`,
+      body: `${actorLabel} đồng ý trả hàng đơn ${order.orderCode}. Tiền ${order.total.toLocaleString('vi-VN')}đ sẽ được hoàn cho bạn.`,
       link: `/orders/${String(order._id)}`,
       data: { orderId: String(order._id), orderCode: order.orderCode },
     });
 
     const fresh = await this.orderModel.findById(order._id);
     return { ok: true, order: this.toSellerOrder(fresh!, true) };
+  }
+
+  /**
+   * Danh sách yêu cầu huỷ/trả hàng đang chờ của các gian hàng ĐANG BỊ ĐÌNH CHỈ
+   * — hàng đợi admin xử lý thay. Quét theo shop suspended trước (thường rất
+   * ít) rồi mới tìm đơn, thay vì quét toàn bộ đơn có yêu cầu chờ rồi lọc —
+   * rẻ hơn nhiều ở quy mô lớn.
+   */
+  async adminListDisputes(): Promise<OrderDisputeItem[]> {
+    const suspendedShops = await this.shopModel
+      .find({ status: 'suspended' })
+      .select('_id name')
+      .lean();
+    if (suspendedShops.length === 0) return [];
+    const shopIds = suspendedShops.map((s) => s._id);
+    const shopNameById = new Map(
+      suspendedShops.map((s) => [String(s._id), s.name]),
+    );
+
+    const orders = await this.orderModel
+      .find({
+        shop: { $in: shopIds },
+        $or: [
+          { 'cancelRequest.status': 'pending' },
+          { 'returnRequest.status': 'requested' },
+        ],
+      })
+      .populate<{
+        buyer: { _id: Types.ObjectId; email?: string; phone?: string };
+      }>('buyer', 'email phone')
+      .lean();
+
+    const items: OrderDisputeItem[] = [];
+    for (const o of orders) {
+      const shopId = String(o.shop);
+      const shopName = shopNameById.get(shopId) ?? '(Gian hàng đã xoá)';
+      const buyerContact = o.buyer?.email || o.buyer?.phone || '(ẩn danh)';
+      if (o.cancelRequest?.status === 'pending') {
+        items.push({
+          orderId: String(o._id),
+          orderCode: o.orderCode,
+          shopId,
+          shopName,
+          type: 'cancel',
+          reasonType: o.cancelRequest.reasonType,
+          reason: o.cancelRequest.reason,
+          requestedAt: o.cancelRequest.requestedAt,
+          buyerContact,
+          total: o.total,
+        });
+      }
+      if (o.returnRequest?.status === 'requested') {
+        items.push({
+          orderId: String(o._id),
+          orderCode: o.orderCode,
+          shopId,
+          shopName,
+          type: 'return',
+          reasonType: o.returnRequest.reasonType,
+          reason: o.returnRequest.reason,
+          requestedAt: o.returnRequest.requestedAt,
+          buyerContact,
+          total: o.total,
+        });
+      }
+    }
+    return items.sort(
+      (a, b) => a.requestedAt.getTime() - b.requestedAt.getTime(),
+    );
   }
 
   /**

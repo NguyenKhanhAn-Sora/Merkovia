@@ -124,8 +124,12 @@ export class PayoutService {
       commissionRate: config.commissionRate,
       holdDays: config.payoutHoldDays,
       minPayout: MIN_PAYOUT_AMOUNT,
-      canRequest: available.net >= MIN_PAYOUT_AMOUNT && !!shop.bankAccount,
+      canRequest:
+        available.net >= MIN_PAYOUT_AMOUNT &&
+        !!shop.bankAccount &&
+        shop.status !== 'suspended',
       hasBankAccount: !!shop.bankAccount,
+      suspended: shop.status === 'suspended',
       provider: { name: this.provider.name, isReal: this.provider.isReal },
     };
   }
@@ -166,6 +170,14 @@ export class PayoutService {
    */
   async requestPayout(user: UserDocument) {
     const shop = await this.requireShop(user);
+
+    // Đóng băng tài chính trong lúc bị đình chỉ — đúng mục đích của đình chỉ
+    // (chờ điều tra), không để shop rút hết tiền trước khi có kết luận.
+    if (shop.status === 'suspended') {
+      throw new ForbiddenException(
+        'Gian hàng đang bị đình chỉ nên không thể rút tiền. Số dư vẫn được giữ nguyên.',
+      );
+    }
 
     if (!shop.bankAccount) {
       throw new BadRequestException(

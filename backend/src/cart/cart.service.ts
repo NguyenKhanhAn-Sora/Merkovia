@@ -41,9 +41,9 @@ export class CartService {
   private async enrich(cart: CartDocument | null) {
     if (!cart || cart.items.length === 0) return [];
 
-    const productIds = [...new Set(cart.items.map((i) => String(i.product)))].map(
-      (id) => new Types.ObjectId(id),
-    );
+    const productIds = [
+      ...new Set(cart.items.map((i) => String(i.product))),
+    ].map((id) => new Types.ObjectId(id));
     const products = await this.productModel.find({ _id: { $in: productIds } });
     const byId = new Map(products.map((p) => [String(p._id), p]));
 
@@ -52,7 +52,7 @@ export class CartService {
     );
     const shops = await this.shopModel
       .find({ _id: { $in: shopIds } })
-      .select('name slug')
+      .select('name slug status vacationMode')
       .lean();
     const byShop = new Map(shops.map((s) => [String(s._id), s]));
 
@@ -61,14 +61,19 @@ export class CartService {
       const variant = product?.variants?.find(
         (v) => String(v._id) === String(item.variant),
       );
+      const shop = product ? byShop.get(String(product.shop)) : undefined;
+      // Gian hàng đang tạm nghỉ/bị đình chỉ thì chưa nhận đơn — khớp đúng điều
+      // kiện chặn ở lúc đặt hàng (`OrdersService.buildGroups`), để giỏ hàng
+      // báo mờ ngay từ đây thay vì để người mua bất ngờ khi bấm thanh toán.
+      const shopOpen = !!shop && shop.status === 'active' && !shop.vacationMode;
       const live =
         !!product &&
         product.status === 'active' &&
         !product.deletedAt &&
         !!variant &&
-        variant.isActive;
+        variant.isActive &&
+        shopOpen;
 
-      const shop = product ? byShop.get(String(product.shop)) : undefined;
       const listPrice = variant?.price ?? 0;
       const price =
         product && isDealLive(product.activeDeal)
@@ -97,7 +102,10 @@ export class CartService {
 
   /** Kiểm sản phẩm/biến thể còn bán được và trả về tồn kho hiện tại. */
   private async validate(productId: string, variantId: string) {
-    if (!Types.ObjectId.isValid(productId) || !Types.ObjectId.isValid(variantId)) {
+    if (
+      !Types.ObjectId.isValid(productId) ||
+      !Types.ObjectId.isValid(variantId)
+    ) {
       throw new BadRequestException('Sản phẩm không hợp lệ.');
     }
     const product = await this.productModel.findOne({
@@ -110,6 +118,17 @@ export class CartService {
     );
     if (!product || !variant) {
       throw new BadRequestException('Sản phẩm này hiện không bán được.');
+    }
+    // Chặn thêm mới từ gian hàng tạm nghỉ/bị đình chỉ ngay từ giỏ hàng — không
+    // để người mua thêm được thứ mà lúc thanh toán chắc chắn bị từ chối.
+    const shop = await this.shopModel
+      .findById(product.shop)
+      .select('status vacationMode')
+      .lean();
+    if (!shop || shop.status !== 'active' || shop.vacationMode) {
+      throw new BadRequestException(
+        'Gian hàng của sản phẩm này hiện không hoạt động.',
+      );
     }
     return variant.stock;
   }
@@ -191,19 +210,14 @@ export class CartService {
     if (!cart) return { items: [] };
     cart.items = cart.items.filter(
       (i) =>
-        !(
-          String(i.product) === productId && String(i.variant) === variantId
-        ),
+        !(String(i.product) === productId && String(i.variant) === variantId),
     );
     await cart.save();
     return { items: await this.enrich(cart) };
   }
 
   async clear(user: UserDocument) {
-    await this.cartModel.updateOne(
-      { user: user._id },
-      { $set: { items: [] } },
-    );
+    await this.cartModel.updateOne({ user: user._id }, { $set: { items: [] } });
     return { items: [] };
   }
 
@@ -217,7 +231,9 @@ export class CartService {
     const cart = await this.loadOrCreate(user);
 
     for (const l of lines.slice(0, MAX_LINES)) {
-      const stock = await this.validate(l.productId, l.variantId).catch(() => 0);
+      const stock = await this.validate(l.productId, l.variantId).catch(
+        () => 0,
+      );
       if (stock <= 0) continue;
 
       const existing = cart.items.find(

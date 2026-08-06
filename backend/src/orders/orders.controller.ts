@@ -26,6 +26,8 @@ import {
 import { RequestReturnDto, RespondReturnDto } from './dto/return.dto';
 import type { OrderStatus } from './schemas/order.schema';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminAuthGuard, CurrentAdmin } from '../admin-auth/admin-auth.guard';
+import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -223,5 +225,46 @@ export class ShopOrdersController {
     @Body() dto: RespondReturnDto,
   ) {
     return this.orders.respondReturn(user, id, dto.approve, dto.note);
+  }
+}
+
+/**
+ * Tranh chấp huỷ/trả hàng của các gian hàng ĐANG BỊ ĐÌNH CHỈ — shop bị đình
+ * chỉ không được tự duyệt (xung đột lợi ích, xem `OrdersService.respondCancelRequest`),
+ * nên admin xử lý thay qua đây.
+ */
+@Controller('admin/orders')
+@UseGuards(AdminAuthGuard)
+export class AdminOrdersController {
+  constructor(private readonly orders: OrdersService) {}
+
+  @Get('disputes')
+  disputes() {
+    return this.orders.adminListDisputes();
+  }
+
+  @Post(':id/cancel-request')
+  @HttpCode(HttpStatus.OK)
+  respondCancel(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id') id: string,
+    @Body() dto: RespondCancelDto,
+  ) {
+    return this.orders.adminRespondCancelRequest(
+      admin,
+      id,
+      dto.approve,
+      dto.note,
+    );
+  }
+
+  @Post(':id/return-request')
+  @HttpCode(HttpStatus.OK)
+  respondReturn(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id') id: string,
+    @Body() dto: RespondReturnDto,
+  ) {
+    return this.orders.adminRespondReturn(admin, id, dto.approve, dto.note);
   }
 }

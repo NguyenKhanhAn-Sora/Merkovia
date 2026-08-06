@@ -41,6 +41,13 @@ export class PromotionsService {
   private async requireShop(user: UserDocument): Promise<ShopDocument> {
     const shop = await this.shopModel.findOne({ owner: user._id });
     if (!shop) throw new ForbiddenException('Tài khoản chưa có gian hàng.');
+    // Cùng chính sách với ProductsService.requireShop: đình chỉ thì không thao
+    // tác được gì trên sản phẩm, kể cả đặt/gỡ khuyến mãi.
+    if (shop.status === 'suspended') {
+      throw new ForbiddenException(
+        'Gian hàng đang bị tạm đình chỉ, không thể thao tác khuyến mãi.',
+      );
+    }
     return shop;
   }
 

@@ -13,12 +13,20 @@ import {
   type ReportQueueItem,
   type ReportTier,
 } from "../../../lib/shop-reports-api";
+import {
+  getDisputes,
+  CANCEL_REASON_LABEL,
+  RETURN_REASON_LABEL,
+  type OrderDisputeItem,
+} from "../../../lib/order-disputes-api";
 import ShopReportModal from "../../../components/dashboard/ShopReportModal";
+import DisputeModal from "../../../components/dashboard/DisputeModal";
 import {
   Badge,
   type BadgeTone,
   DataTable,
   EmptyState,
+  formatVnd,
   GhostButton,
   PageHeader,
   Panel,
@@ -61,7 +69,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function ReportsPage() {
-  const [tab, setTab] = useState<"queue" | "history">("queue");
+  const [tab, setTab] = useState<"queue" | "history" | "disputes">("queue");
 
   const [items, setItems] = useState<ReportQueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
@@ -71,7 +79,12 @@ export default function ReportsPage() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
 
+  const [disputes, setDisputes] = useState<OrderDisputeItem[]>([]);
+  const [disputesLoading, setDisputesLoading] = useState(true);
+  const [disputesError, setDisputesError] = useState("");
+
   const [openShopId, setOpenShopId] = useState<string | null>(null);
+  const [openDispute, setOpenDispute] = useState<OrderDisputeItem | null>(null);
 
   const loadQueue = useCallback(() => {
     setQueueLoading(true);
@@ -93,14 +106,25 @@ export default function ReportsPage() {
       .finally(() => setHistoryLoading(false));
   }, []);
 
-  const loadBoth = useCallback(() => {
+  const loadDisputes = useCallback(() => {
+    setDisputesLoading(true);
+    getDisputes()
+      .then(setDisputes)
+      .catch((e: unknown) =>
+        setDisputesError(e instanceof Error ? e.message : "Không tải được danh sách tranh chấp."),
+      )
+      .finally(() => setDisputesLoading(false));
+  }, []);
+
+  const loadAll = useCallback(() => {
     loadQueue();
     loadHistory();
-  }, [loadQueue, loadHistory]);
+    loadDisputes();
+  }, [loadQueue, loadHistory, loadDisputes]);
 
   useEffect(() => {
-    loadBoth();
-  }, [loadBoth]);
+    loadAll();
+  }, [loadAll]);
 
   return (
     <div>
@@ -115,9 +139,10 @@ export default function ReportsPage() {
             tabs={[
               { key: "queue", label: "Đang chờ xử lý", count: items.length },
               { key: "history", label: "Lịch sử xử lý", count: history.length },
+              { key: "disputes", label: "Tranh chấp đơn hàng", count: disputes.length },
             ]}
             value={tab}
-            onChange={(k) => setTab(k as "queue" | "history")}
+            onChange={(k) => setTab(k as "queue" | "history" | "disputes")}
           />
         </div>
 
@@ -221,13 +246,71 @@ export default function ReportsPage() {
               ))}
             </DataTable>
           ))}
+
+        {tab === "disputes" &&
+          (disputesLoading ? (
+            <div className="flex justify-center py-16">
+              <CircleNotch size={22} className="animate-spin text-star/40" />
+            </div>
+          ) : disputesError ? (
+            <p className="px-6 py-10 text-center text-[13.5px] text-rose-300">{disputesError}</p>
+          ) : disputes.length === 0 ? (
+            <EmptyState
+              icon={Flag}
+              title="Không có tranh chấp nào cần xử lý"
+              description="Yêu cầu huỷ/trả hàng của gian hàng đang bị đình chỉ sẽ hiện ở đây — shop bị đình chỉ không được tự duyệt."
+            />
+          ) : (
+            <DataTable
+              columns={["Đơn hàng", "Gian hàng", "Loại", "Lý do", "Người mua", "Số tiền", "Yêu cầu lúc", ""]}
+            >
+              {disputes.map((d) => (
+                <tr key={`${d.type}-${d.orderId}`}>
+                  <Td className="font-medium text-star/85">{d.orderCode}</Td>
+                  <Td className="text-star/70">{d.shopName}</Td>
+                  <Td>
+                    <Badge tone={d.type === "cancel" ? "warning" : "info"}>
+                      {d.type === "cancel" ? "Huỷ đơn" : "Trả hàng"}
+                    </Badge>
+                  </Td>
+                  <Td className="max-w-[220px] truncate text-star/55">
+                    {d.reasonType
+                      ? ((d.type === "cancel" ? CANCEL_REASON_LABEL : RETURN_REASON_LABEL)[
+                          d.reasonType
+                        ] ?? d.reasonType)
+                      : "—"}
+                  </Td>
+                  <Td className="text-star/60">{d.buyerContact}</Td>
+                  <Td className="text-star/85">{formatVnd(d.total)}</Td>
+                  <Td className="text-star/50">{timeAgo(d.requestedAt)}</Td>
+                  <Td>
+                    <GhostButton
+                      icon={Eye}
+                      onClick={() => setOpenDispute(d)}
+                      className="h-9 px-3 text-[13px]"
+                    >
+                      Xử lý
+                    </GhostButton>
+                  </Td>
+                </tr>
+              ))}
+            </DataTable>
+          ))}
       </Panel>
 
       {openShopId && (
         <ShopReportModal
           shopId={openShopId}
           onClose={() => setOpenShopId(null)}
-          onResolved={loadBoth}
+          onResolved={loadAll}
+        />
+      )}
+
+      {openDispute && (
+        <DisputeModal
+          dispute={openDispute}
+          onClose={() => setOpenDispute(null)}
+          onResolved={loadDisputes}
         />
       )}
     </div>
