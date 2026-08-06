@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   CircleNotch,
   LockKeyOpen,
+  PlayCircle,
   Prohibit,
   ShieldWarning,
   Storefront,
@@ -18,9 +19,95 @@ import {
   REPORTER_TRUST_LABEL,
   type ReportAction,
   type ReporterTrustTier,
+  type ShopProfile,
   type ShopReportsDetail,
 } from "../../lib/shop-reports-api";
-import { Badge, type BadgeTone } from "./ui";
+import { Badge, formatVnd, type BadgeTone } from "./ui";
+
+/** Định dạng % gọn, vd 0.156 -> "16%". */
+function pct(v: number): string {
+  return `${Math.round(v * 100)}%`;
+}
+
+/** Tông màu cảnh báo cho một chỉ số — cao bất thường thì tô nổi lên thay vì lẫn vào chữ trung tính. */
+function toneClass(level: "normal" | "warn" | "danger"): string {
+  if (level === "danger") return "text-rose-300";
+  if (level === "warn") return "text-amber-300";
+  return "text-star/85";
+}
+
+/** Hàm thuần bên ngoài component — gọi `Date.now()` trong thân component sẽ bị lint chặn (impure render). */
+function ageInDays(createdAt: string): number {
+  return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
+}
+
+/**
+ * Hồ sơ vận hành của shop — cơ sở để admin xác nhận vi phạm ngoài lời tố cáo.
+ * Ngưỡng cảnh báo (15% huỷ/trả hàng, dưới 4 sao) là ước lượng hợp lý cho sàn
+ * quy mô hiện tại — có thể tinh chỉnh sau khi có dữ liệu thực tế.
+ */
+function ShopProfilePanel({ profile }: { profile: ShopProfile }) {
+  const cancelLevel = profile.sellerCancelRate > 0.25 ? "danger" : profile.sellerCancelRate > 0.15 ? "warn" : "normal";
+  const returnLevel = profile.returnRate > 0.25 ? "danger" : profile.returnRate > 0.15 ? "warn" : "normal";
+  const ratingLevel =
+    profile.ratingCount === 0 ? "normal" : profile.ratingAvg < 3.5 ? "danger" : profile.ratingAvg < 4 ? "warn" : "normal";
+  const suspendLevel = profile.pastSuspensions > 0 ? "danger" : profile.pastWarnings > 0 ? "warn" : "normal";
+  const rejectedLevel = profile.rejectedProductCount > 0 ? "warn" : "normal";
+  const ageDays = ageInDays(profile.createdAt);
+
+  const BUSINESS_LABEL: Record<string, string> = {
+    personal: "Cá nhân",
+    household: "Hộ kinh doanh",
+    company: "Doanh nghiệp",
+  };
+
+  const cells: { label: string; value: string; level: "normal" | "warn" | "danger" }[] = [
+    {
+      label: "Tuổi gian hàng",
+      value: ageDays < 30 ? `${ageDays} ngày` : `${Math.floor(ageDays / 30)} tháng`,
+      level: ageDays < 14 ? "warn" : "normal",
+    },
+    {
+      label: "Loại hình",
+      value:
+        (BUSINESS_LABEL[profile.businessType] ?? profile.businessType) +
+        (profile.hasTaxCode ? " · có MST" : " · chưa có MST"),
+      level: "normal",
+    },
+    { label: "Tổng đơn hàng", value: String(profile.totalOrders), level: "normal" },
+    { label: "Tỉ lệ shop tự huỷ đơn", value: pct(profile.sellerCancelRate), level: cancelLevel },
+    { label: "Tỉ lệ bị trả hàng", value: pct(profile.returnRate), level: returnLevel },
+    {
+      label: "Đánh giá",
+      value: profile.ratingCount > 0 ? `${profile.ratingAvg}★ (${profile.ratingCount})` : "Chưa có đánh giá",
+      level: ratingLevel,
+    },
+    {
+      label: "Tiền án vi phạm",
+      value: `${profile.pastWarnings} cảnh cáo · ${profile.pastSuspensions} đình chỉ`,
+      level: suspendLevel,
+    },
+    {
+      label: "Sản phẩm",
+      value: `${profile.activeProductCount} đang bán · ${profile.rejectedProductCount} từng bị từ chối`,
+      level: rejectedLevel,
+    },
+  ];
+
+  return (
+    <div className="mb-4 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3.5">
+      <p className="mb-2.5 text-[12.5px] font-semibold text-star/70">Hồ sơ gian hàng</p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4">
+        {cells.map((c) => (
+          <div key={c.label}>
+            <p className="text-[11px] text-star/40">{c.label}</p>
+            <p className={`mt-0.5 text-[13px] font-medium ${toneClass(c.level)}`}>{c.value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /** Số ngày đình chỉ có sẵn để chọn nhanh — `undefined` = vô thời hạn. */
 const SUSPEND_DURATION_OPTIONS: { value: number | undefined; label: string }[] = [
@@ -176,7 +263,7 @@ export default function ShopReportModal({
       <div
         role="dialog"
         aria-modal="true"
-        className="relative flex max-h-[85vh] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[rgba(4,10,18,0.97)] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.9)] backdrop-blur-xl"
+        className="relative flex max-h-[85vh] w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[rgba(4,10,18,0.97)] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.9)] backdrop-blur-xl"
       >
         <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-6 py-4">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -204,6 +291,8 @@ export default function ShopReportModal({
             <p className="text-[13.5px] text-rose-300">{loadError}</p>
           ) : (
             <>
+              {detail?.shopProfile && <ShopProfilePanel profile={detail.shopProfile} />}
+
               {detail?.shop.status === "suspended" && (
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3">
                   <div className="min-w-0">
@@ -254,6 +343,44 @@ export default function ShopReportModal({
                         {r.detail}
                       </p>
                     )}
+
+                    {r.evidence.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {r.evidence.map((ev, i) => (
+                          <a
+                            key={ev.url + i}
+                            href={ev.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]"
+                            title={ev.kind === "video" ? "Xem video minh chứng" : "Xem ảnh minh chứng cỡ đầy đủ"}
+                          >
+                            {ev.kind === "video" ? (
+                              <span className="flex h-full w-full items-center justify-center text-star/60">
+                                <PlayCircle size={20} weight="fill" />
+                              </span>
+                            ) : (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={ev.url} alt="" className="h-full w-full object-cover" />
+                            )}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                    {r.order && (
+                      <div className="mt-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[12px] text-star/55">
+                        <p className="font-medium text-star/70">
+                          Đơn {r.order.orderCode} · {formatVnd(r.order.total)}
+                        </p>
+                        <p className="mt-0.5 truncate">
+                          {r.order.items
+                            .map((it) => `${it.name}${it.variantLabel ? ` (${it.variantLabel})` : ""} ×${it.quantity}`)
+                            .join(", ")}
+                        </p>
+                      </div>
+                    )}
+
                     <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-star/40">
                       <span>
                         Người báo cáo: {r.reporterContact} ·{" "}
@@ -261,7 +388,6 @@ export default function ShopReportModal({
                           dateStyle: "short",
                           timeStyle: "short",
                         })}
-                        {r.orderId && ` · Đơn liên quan: ${r.orderId.slice(-8)}`}
                       </span>
                       {TRUST_BADGE[r.reporterTrust] && (
                         <Badge tone={TRUST_BADGE[r.reporterTrust]}>

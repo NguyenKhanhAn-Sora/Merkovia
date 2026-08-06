@@ -10,6 +10,8 @@ import {
 import { ShopsModule } from '../shops/shops.module';
 import { OrdersModule } from '../orders/orders.module';
 import { UsersModule } from '../users/users.module';
+import { ReviewsModule } from '../reviews/reviews.module';
+import { ProductsModule } from '../products/products.module';
 import { AuthModule } from '../auth/auth.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -21,8 +23,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: ShopReport.name, schema: ShopReportSchema },
     ]),
     ShopsModule,
-    OrdersModule, // model Order: xác minh đơn kèm theo đúng người gửi + đúng shop
+    OrdersModule, // model Order: xác minh đơn kèm theo, hồ sơ shop, ngữ cảnh đơn hàng
     UsersModule, // email chủ shop để gửi thông báo vi phạm
+    ReviewsModule, // model Review: điểm đánh giá trong hồ sơ shop
+    ProductsModule, // model Product: số sản phẩm đang bán / từng bị từ chối
     AuthModule, // JwtAuthGuard (người mua) + MailService
     AdminAuthModule, // AdminAuthGuard (trang quản trị)
     NotificationsModule, // báo vi phạm real-time cho gian hàng

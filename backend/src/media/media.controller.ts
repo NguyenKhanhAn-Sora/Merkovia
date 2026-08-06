@@ -87,7 +87,8 @@ export class MediaController {
         validators: [
           new MaxFileSizeValidator({ maxSize: 50 * MB }),
           new FileTypeValidator({
-            fileType: /^(image\/(png|jpe?g|webp|gif)|video\/(mp4|quicktime|webm))$/,
+            fileType:
+              /^(image\/(png|jpe?g|webp|gif)|video\/(mp4|quicktime|webm))$/,
           }),
         ],
       }),
@@ -97,6 +98,35 @@ export class MediaController {
     return this.media.upload(
       { buffer: file.buffer, mimetype: file.mimetype },
       'reviews',
+    );
+  }
+
+  /**
+   * Ảnh/video minh chứng đính kèm báo cáo vi phạm gian hàng.
+   * Cùng giới hạn với `review` (50 MB, ảnh + video) — cùng mục đích: cho phép
+   * người dùng chứng minh bằng hình ảnh thật thay vì chỉ mô tả bằng chữ.
+   */
+  @Post('report')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * MB } }))
+  uploadReportEvidence(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 50 * MB }),
+          new FileTypeValidator({
+            fileType:
+              /^(image\/(png|jpe?g|webp|gif)|video\/(mp4|quicktime|webm))$/,
+          }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.media.upload(
+      { buffer: file.buffer, mimetype: file.mimetype },
+      'reports',
     );
   }
 }

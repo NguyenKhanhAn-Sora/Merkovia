@@ -44,6 +44,22 @@ export interface ReportQueueItem {
   latestReportAt: string;
 }
 
+export interface ReportEvidence {
+  kind: "image" | "video";
+  url: string;
+  key?: string;
+}
+
+/** Ngữ cảnh đơn hàng liên quan tới một báo cáo — để đối chiếu, không phải chứng cứ tự thân. */
+export interface ReportOrderContext {
+  id: string;
+  orderCode: string;
+  status: string;
+  total: number;
+  createdAt: string;
+  items: { name: string; variantLabel?: string; quantity: number; price: number }[];
+}
+
 export interface ShopReportItem {
   id: string;
   reasonType: string;
@@ -53,7 +69,8 @@ export interface ShopReportItem {
   reporterContact: string;
   /** Độ tin cậy của người gửi — chỉ để admin tham khảo, không tự loại báo cáo nào. */
   reporterTrust: ReporterTrustTier;
-  orderId?: string;
+  evidence: ReportEvidence[];
+  order?: ReportOrderContext;
   createdAt: string;
   resolution?: {
     action: ReportAction;
@@ -61,6 +78,26 @@ export interface ShopReportItem {
     resolvedAt: string;
     resolvedBy: string;
   };
+}
+
+/**
+ * Hồ sơ vận hành của một shop — CƠ SỞ để đánh giá vi phạm ngoài lời tố cáo:
+ * hành vi thực tế (tỉ lệ huỷ/trả hàng), đánh giá thật, và tiền án. Cố tình
+ * KHÔNG có mô tả/logo/địa chỉ — những thứ đó không nói lên có vi phạm hay không.
+ */
+export interface ShopProfile {
+  createdAt: string;
+  businessType: string;
+  hasTaxCode: boolean;
+  totalOrders: number;
+  sellerCancelRate: number;
+  returnRate: number;
+  ratingAvg: number;
+  ratingCount: number;
+  pastWarnings: number;
+  pastSuspensions: number;
+  activeProductCount: number;
+  rejectedProductCount: number;
 }
 
 export const REPORT_ACTION_LABEL: Record<ReportAction, string> = {
@@ -92,6 +129,7 @@ export interface ShopReportsDetail {
     /** Hạn tự động gỡ đình chỉ (nếu đình chỉ có thời hạn) — `null`/không có = vô thời hạn. */
     suspendedUntil?: string | null;
   };
+  shopProfile: ShopProfile;
   reports: ShopReportItem[];
 }
 

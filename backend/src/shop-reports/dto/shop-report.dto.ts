@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsMongoId,
@@ -9,8 +11,29 @@ import {
   Min,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
-import { REPORT_ACTIONS, REPORT_REASONS } from '../schemas/shop-report.schema';
+import { Type } from 'class-transformer';
+import {
+  EVIDENCE_KINDS,
+  MAX_EVIDENCE,
+  REPORT_ACTIONS,
+  REPORT_REASONS,
+} from '../schemas/shop-report.schema';
+
+export class ReportEvidenceDto {
+  @IsIn(EVIDENCE_KINDS, { message: 'Loại tệp đính kèm không hợp lệ.' })
+  kind: string;
+
+  @IsString({ message: 'Tệp đính kèm không hợp lệ.' })
+  @MaxLength(500, { message: 'Đường dẫn tệp quá dài.' })
+  url: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  key?: string;
+}
 
 /** Người mua gửi báo cáo vi phạm một gian hàng. */
 export class CreateShopReportDto {
@@ -31,6 +54,16 @@ export class CreateShopReportDto {
   @IsOptional()
   @IsMongoId({ message: 'Đơn hàng không hợp lệ.' })
   orderId?: string;
+
+  /** Ảnh/video minh chứng — không bắt buộc, nhưng giúp admin xác nhận vi phạm nhanh hơn nhiều. */
+  @IsOptional()
+  @IsArray({ message: 'Danh sách tệp đính kèm không hợp lệ.' })
+  @ArrayMaxSize(MAX_EVIDENCE, {
+    message: `Tối đa ${MAX_EVIDENCE} ảnh/video đính kèm.`,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => ReportEvidenceDto)
+  evidence?: ReportEvidenceDto[];
 }
 
 /** Admin xử lý TẤT CẢ báo cáo đang chờ của một shop cùng một lúc. */

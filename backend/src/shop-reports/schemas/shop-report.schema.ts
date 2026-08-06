@@ -53,6 +53,31 @@ export type ReportStatus = (typeof REPORT_STATUS)[number];
 export const REPORT_ACTIONS = ['warning', 'suspend', 'dismiss'] as const;
 export type ReportAction = (typeof REPORT_ACTIONS)[number];
 
+export const EVIDENCE_KINDS = ['image', 'video'] as const;
+export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
+
+/** Tối đa mỗi báo cáo — đủ minh chứng, không thành kho ảnh. Khớp `MAX_MEDIA` của đánh giá. */
+export const MAX_EVIDENCE = 6;
+
+/**
+ * Ảnh/video người báo cáo đính kèm làm bằng chứng — cho admin CƠ SỞ để xác
+ * nhận vi phạm thay vì chỉ có một dòng lý do dạng chữ. Giữ đúng cấu trúc
+ * `ReviewMedia` (đánh giá sản phẩm) để dùng chung một luồng tải lên/hiển thị.
+ */
+@Schema({ _id: false })
+export class ReportEvidence {
+  @Prop({ type: String, enum: EVIDENCE_KINDS, required: true })
+  kind: EvidenceKind;
+
+  @Prop({ required: true, trim: true })
+  url: string;
+
+  /** Khoá trên R2 — giữ lại để dọn được file nếu sau này cần xoá báo cáo. */
+  @Prop({ trim: true })
+  key?: string;
+}
+const ReportEvidenceSchema = SchemaFactory.createForClass(ReportEvidence);
+
 /** Kết quả xử lý — chỉ có khi báo cáo đã `resolved`/`dismissed`. */
 @Schema({ _id: false })
 export class ShopReportResolution {
@@ -112,6 +137,10 @@ export class ShopReport {
    */
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Order' })
   order?: Types.ObjectId;
+
+  /** Bằng chứng đính kèm (ảnh/video) — tuỳ chọn, giúp admin xác nhận vi phạm nhanh hơn. */
+  @Prop({ type: [ReportEvidenceSchema], default: [] })
+  evidence: ReportEvidence[];
 
   @Prop({
     type: String,

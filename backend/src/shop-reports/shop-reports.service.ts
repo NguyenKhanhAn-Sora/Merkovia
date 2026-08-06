@@ -21,6 +21,8 @@ import {
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { Review, ReviewDocument } from '../reviews/schemas/review.schema';
+import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../auth/mail.service';
 import { ShopSuspensionService } from './shop-suspension.service';
@@ -58,6 +60,49 @@ export interface ReportHistoryItem {
   lastActionBy: string;
   /** Tổng số báo cáo (mọi trạng thái, mọi thời điểm) shop này từng nhận. */
   totalReports: number;
+}
+
+/** Đơn hàng liên quan tới MỘT báo cáo — ngữ cảnh để admin đối chiếu, không phải để phân quyền. */
+export interface ReportOrderContext {
+  id: string;
+  orderCode: string;
+  status: string;
+  total: number;
+  createdAt: Date;
+  items: {
+    name: string;
+    variantLabel?: string;
+    quantity: number;
+    price: number;
+  }[];
+}
+
+/**
+ * Hồ sơ vận hành của MỘT shop — CƠ SỞ để admin đánh giá "shop này có đáng
+ * ngờ không" ngoài lời tố cáo của một mình người báo cáo. Chỉ chọn những số
+ * liệu THỰC SỰ nói lên hành vi (tỉ lệ huỷ/trả hàng, đánh giá, tiền án) — cố
+ * tình KHÔNG đưa mô tả/logo/địa chỉ kho/lịch sử đổi tên... vào đây vì chúng
+ * không giúp trả lời câu hỏi "có vi phạm hay không".
+ */
+export interface ShopProfile {
+  createdAt: Date;
+  businessType: string;
+  /** Có mã số thuế/GPKD hay không — hộ KD/doanh nghiệp có mức chịu trách nhiệm pháp lý cao hơn cá nhân. */
+  hasTaxCode: boolean;
+  totalOrders: number;
+  /** Tỉ lệ đơn CHÍNH shop huỷ (0..1) — cao bất thường là dấu hiệu hết hàng ảo/không giao được hàng. */
+  sellerCancelRate: number;
+  /** Tỉ lệ đơn bị trả hàng (0..1) — cao bất thường là dấu hiệu hàng không đúng mô tả/kém chất lượng. */
+  returnRate: number;
+  ratingAvg: number;
+  ratingCount: number;
+  /** Số LẦN admin từng cảnh cáo shop này (đếm theo lượt xử lý, không đếm theo số báo cáo). */
+  pastWarnings: number;
+  /** Số LẦN admin từng đình chỉ shop này. */
+  pastSuspensions: number;
+  activeProductCount: number;
+  /** Sản phẩm từng bị từ chối duyệt — dấu hiệu cố ý đăng nội dung vi phạm. */
+  rejectedProductCount: number;
 }
 
 /** Độ tin cậy của MỘT người báo cáo — nhân vào điểm, không dùng để chặn quyền báo cáo. */
@@ -110,6 +155,10 @@ export class ShopReportsService {
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Review.name)
+    private readonly reviewModel: Model<ReviewDocument>,
+    @InjectModel(Product.name)
+    private readonly productModel: Model<ProductDocument>,
     private readonly notifications: NotificationsService,
     private readonly mail: MailService,
     private readonly suspension: ShopSuspensionService,
@@ -139,8 +188,16 @@ export class ShopReportsService {
       if (!Types.ObjectId.isValid(dto.orderId)) {
         throw new BadRequestException('Đơn hàng không hợp lệ.');
       }
+      // 🔴 `shop` PHẢI là ObjectId thật, không phải chuỗi: field này bị lỗi
+      // Mixed-type kinh niên của cả codebase (xem memory `merkovia-objectid-
+      // gotcha`) nên Mongoose không tự ép kiểu — so sánh với chuỗi sẽ luôn
+      // trượt dù đúng shop, khiến ngữ cảnh đơn hàng bị âm thầm rớt mất.
       const order = await this.orderModel
-        .findOne({ _id: dto.orderId, buyer: user._id, shop: dto.shopId })
+        .findOne({
+          _id: dto.orderId,
+          buyer: user._id,
+          shop: new Types.ObjectId(dto.shopId),
+        })
         .select('_id')
         .lean();
       if (order) orderId = order._id;
@@ -158,12 +215,19 @@ export class ShopReportsService {
       );
     }
 
+    const evidence = (dto.evidence ?? []).map((e) => ({
+      kind: e.kind as 'image' | 'video',
+      url: e.url.trim(),
+      key: e.key?.trim(),
+    }));
+
     await this.reportModel.create({
       reporter: user._id,
       shop: dto.shopId,
       reasonType: dto.reasonType,
       detail: dto.detail?.trim() || undefined,
       order: orderId,
+      evidence,
       status: 'pending',
     });
     return { ok: true };
@@ -350,12 +414,17 @@ export class ShopReportsService {
       .sort((a, b) => b.lastActionAt.getTime() - a.lastActionAt.getTime());
   }
 
-  /** Danh sách từng báo cáo (mọi trạng thái) của một shop — cho khay chi tiết. */
+  /**
+   * Danh sách từng báo cáo (mọi trạng thái) của một shop — cho khay chi tiết.
+   * Kèm 3 thứ giúp admin xác nhận vi phạm thay vì chỉ đọc một dòng lý do:
+   * bằng chứng ảnh/video người báo cáo gửi, ngữ cảnh đơn hàng liên quan (nếu
+   * có), và hồ sơ vận hành tổng thể của shop (xem `computeShopProfile`).
+   */
   async listForShop(shopId: string) {
     if (!Types.ObjectId.isValid(shopId)) {
       throw new BadRequestException('Gian hàng không hợp lệ.');
     }
-    const [shop, reports] = await Promise.all([
+    const [shop, reports, shopProfile] = await Promise.all([
       this.shopModel
         .findById(shopId)
         .select('name slug status suspendedUntil')
@@ -368,6 +437,7 @@ export class ShopReportsService {
           reporter: { _id: Types.ObjectId; email?: string; phone?: string };
         }>('reporter', 'email phone')
         .lean(),
+      this.computeShopProfile(shopId),
     ]);
     if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
 
@@ -378,6 +448,34 @@ export class ShopReportsService {
     ];
     const trustMap = await this.computeTrustScores(reporterIds);
 
+    // Đơn hàng liên quan — gộp truy vấn MỘT lần cho mọi báo cáo có `order`,
+    // không lặp N+1 cho từng báo cáo riêng lẻ.
+    const orderIds = [
+      ...new Set(reports.filter((r) => r.order).map((r) => String(r.order))),
+    ];
+    const orderContextById = new Map<string, ReportOrderContext>();
+    if (orderIds.length > 0) {
+      const orders = await this.orderModel
+        .find({ _id: { $in: orderIds } })
+        .select('orderCode status total items')
+        .lean();
+      for (const o of orders) {
+        orderContextById.set(String(o._id), {
+          id: String(o._id),
+          orderCode: o.orderCode,
+          status: o.status,
+          total: o.total,
+          createdAt: (o as unknown as { createdAt: Date }).createdAt,
+          items: o.items.map((it) => ({
+            name: it.name,
+            variantLabel: it.variantLabel || undefined,
+            quantity: it.quantity,
+            price: it.price,
+          })),
+        });
+      }
+    }
+
     return {
       shop: {
         id: shopId,
@@ -386,6 +484,7 @@ export class ShopReportsService {
         status: shop.status,
         suspendedUntil: shop.suspendedUntil,
       },
+      shopProfile,
       reports: reports.map((r) => ({
         id: String(r._id),
         reasonType: r.reasonType,
@@ -396,7 +495,8 @@ export class ShopReportsService {
         reporterTrust:
           trustMap.get(String(r.reporter?._id ?? r.reporter))?.tier ??
           'regular',
-        orderId: r.order ? String(r.order) : undefined,
+        evidence: r.evidence ?? [],
+        order: r.order ? orderContextById.get(String(r.order)) : undefined,
         createdAt: (r as unknown as { createdAt: Date }).createdAt,
         resolution: r.resolution
           ? {
@@ -624,6 +724,121 @@ export class ShopReportsService {
     if (weight < 0.75) return 'low';
     if (weight > 1.3) return 'trusted';
     return 'regular';
+  }
+
+  /**
+   * Hồ sơ vận hành của một shop — xem `ShopProfile` để biết vì sao chọn đúng
+   * các số liệu này. Gộp 5 truy vấn độc lập bằng `Promise.all` thay vì chạy
+   * tuần tự.
+   */
+  private async computeShopProfile(shopId: string): Promise<ShopProfile> {
+    const shopObjId = new Types.ObjectId(shopId);
+
+    const [
+      shop,
+      orderAgg,
+      reviewAgg,
+      violationEvents,
+      activeProducts,
+      rejectedProducts,
+    ] = await Promise.all([
+      this.shopModel
+        .findById(shopId)
+        .select('businessType taxCode createdAt')
+        .lean(),
+      this.orderModel.aggregate<{
+        _id: null;
+        total: number;
+        sellerCancelled: number;
+        returned: number;
+      }>([
+        { $match: { shop: shopObjId } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            sellerCancelled: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ['$status', 'cancelled'] },
+                      { $eq: ['$cancelledBy', 'seller'] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            returned: {
+              $sum: { $cond: [{ $eq: ['$status', 'returned'] }, 1, 0] },
+            },
+          },
+        },
+      ]),
+      this.reviewModel.aggregate<{ _id: null; avg: number; count: number }>([
+        { $match: { shop: shopObjId } },
+        { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+      ]),
+      // Một lượt admin xử lý gán CÙNG `resolution.resolvedAt` cho MỌI báo cáo
+      // trong lượt đó (xem `resolve()`) — gộp theo mốc này để đếm đúng số
+      // LẦN xử lý, không đếm trùng theo số báo cáo (5 báo cáo xử lý chung 1
+      // lần chỉ là MỘT tiền án, không phải năm).
+      this.reportModel.aggregate<{ _id: Date | null; action: string }>([
+        {
+          $match: {
+            shop: shopObjId,
+            status: { $in: ['resolved', 'dismissed'] },
+          },
+        },
+        {
+          $group: {
+            _id: '$resolution.resolvedAt',
+            action: { $first: '$resolution.action' },
+          },
+        },
+      ]),
+      this.productModel.countDocuments({
+        shop: shopObjId,
+        status: 'active',
+        deletedAt: null,
+      }),
+      this.productModel.countDocuments({
+        shop: shopObjId,
+        'moderation.state': 'rejected',
+      }),
+    ]);
+
+    const orderStats = orderAgg[0] ?? {
+      total: 0,
+      sellerCancelled: 0,
+      returned: 0,
+    };
+    const reviewStats = reviewAgg[0] ?? { avg: 0, count: 0 };
+    const shopCreatedAt =
+      (shop as unknown as { createdAt?: Date } | null)?.createdAt ?? new Date();
+
+    return {
+      createdAt: shopCreatedAt,
+      businessType: shop?.businessType ?? 'personal',
+      hasTaxCode: !!shop?.taxCode,
+      totalOrders: orderStats.total,
+      sellerCancelRate:
+        orderStats.total > 0
+          ? orderStats.sellerCancelled / orderStats.total
+          : 0,
+      returnRate:
+        orderStats.total > 0 ? orderStats.returned / orderStats.total : 0,
+      ratingAvg: Math.round((reviewStats.avg ?? 0) * 10) / 10,
+      ratingCount: reviewStats.count,
+      pastWarnings: violationEvents.filter((e) => e.action === 'warning')
+        .length,
+      pastSuspensions: violationEvents.filter((e) => e.action === 'suspend')
+        .length,
+      activeProductCount: activeProducts,
+      rejectedProductCount: rejectedProducts,
+    };
   }
 
   private async notifyShopOfAction(
