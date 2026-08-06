@@ -174,6 +174,11 @@ export const config = {
      * chiều có thể khác — vector khác chiều sẽ bị bỏ qua khi tính cosine.
      */
     embedModel: optional('GEMINI_EMBED_MODEL', 'gemini-embedding-001'),
+    /**
+     * Model đa phương thức (ảnh + văn bản) dùng để kiểm duyệt sản phẩm tự động
+     * — xem `ProductModerationService`. Cần bản Flash trở lên để hiểu ảnh.
+     */
+    moderationModel: optional('GEMINI_MODERATION_MODEL', 'gemini-flash-latest'),
     baseUrl: optional(
       'GEMINI_BASE_URL',
       'https://generativelanguage.googleapis.com/v1beta',

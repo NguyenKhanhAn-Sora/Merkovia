@@ -43,6 +43,9 @@ export const NOTIF_TYPES = [
   'shop_report_suspended',
   /** Hết hạn đình chỉ (tự động qua `ShopSuspensionService`) hoặc admin gỡ tay sớm. */
   'shop_suspension_lifted',
+  /** Kiểm duyệt sản phẩm (AI hoặc admin) — xem `ProductModerationService`. */
+  'product_approved',
+  'product_rejected',
 ] as const;
 export type NotifType = (typeof NOTIF_TYPES)[number];
 

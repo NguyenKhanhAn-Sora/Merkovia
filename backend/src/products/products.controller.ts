@@ -13,10 +13,17 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ProductsService } from './products.service';
+import { ProductModerationService } from './product-moderation.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
+import {
+  ModerateProductDto,
+  QueryAdminProductsDto,
+} from './dto/admin-products.dto';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminAuthGuard, CurrentAdmin } from '../admin-auth/admin-auth.guard';
+import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /** Quản lý sản phẩm trong Kênh Người Bán — mọi route đều yêu cầu đăng nhập. */
@@ -67,5 +74,32 @@ export class ProductsController {
   @HttpCode(HttpStatus.OK)
   restore(@CurrentUser() user: UserDocument, @Param('id') id: string) {
     return this.products.restore(user, id);
+  }
+}
+
+/** Hàng đợi kiểm duyệt sản phẩm (AI + tay) trong Kênh Quản trị. */
+@Controller('admin/products')
+@UseGuards(AdminAuthGuard)
+export class AdminProductsController {
+  constructor(private readonly moderation: ProductModerationService) {}
+
+  @Get()
+  list(@Query() query: QueryAdminProductsDto) {
+    return this.moderation.adminList(query);
+  }
+
+  @Get(':id')
+  detail(@Param('id') id: string) {
+    return this.moderation.adminDetail(id);
+  }
+
+  @Post(':id/moderate')
+  @HttpCode(HttpStatus.OK)
+  moderate(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id') id: string,
+    @Body() dto: ModerateProductDto,
+  ) {
+    return this.moderation.adminModerate(admin, id, dto.action, dto.reason);
   }
 }

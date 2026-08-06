@@ -24,6 +24,7 @@ import { isDealLive } from './deal';
 import { buildSearchText, shortId, slugify } from '../common/text';
 import { EmbeddingService } from '../search/embedding.service';
 import { buildEmbedText } from '../search/embed-text';
+import { ProductModerationService } from './product-moderation.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -58,6 +59,7 @@ export class ProductsService {
     private readonly categories: CategoriesService,
     private readonly media: MediaService,
     private readonly embedding: EmbeddingService,
+    private readonly moderation: ProductModerationService,
   ) {}
 
   private readonly logger = new Logger(ProductsService.name);
@@ -200,6 +202,33 @@ export class ProductsService {
     product.totalStock = active.reduce((sum, v) => sum + (v.stock ?? 0), 0);
   }
 
+  /**
+   * Cổng kiểm duyệt AI: đăng bán (`active`) mà nội dung vừa đổi, hoặc sản phẩm
+   * chưa từng được AI/admin thật sự duyệt qua, thì phải quay về `pending` và
+   * chờ xét lại — tránh việc đăng nội dung sạch cho qua vòng đầu rồi đổi sang
+   * nội dung vi phạm ngay sau đó (đã xác nhận với người dùng). Dùng
+   * `reviewedAt` (không chỉ `state`) để phân biệt "đã thật sự qua AI/admin"
+   * với "chưa từng đụng tới" — sản phẩm draft mới tạo có `state: 'ok'` mặc
+   * định (giá trị vô hại vì chưa ai nhìn thấy) nhưng KHÔNG có `reviewedAt`, nên
+   * lần đầu publish vẫn bị bắt xét duyệt dù không đổi nội dung nào ở request đó.
+   *
+   * Trả về `true` khi vừa CHUYỂN sang `pending` ở lần gọi này — chỉ khi đó mới
+   * bắn job AI, tránh gọi lặp nếu sản phẩm vốn đã đang `pending` từ trước.
+   */
+  private gateModerationOnPublish(
+    product: ProductDocument,
+    targetStatus: ProductStatus,
+    contentChanged: boolean,
+  ): boolean {
+    if (targetStatus !== 'active') return false;
+    const m = product.moderation;
+    const needsReview = contentChanged || m?.state !== 'ok' || !m?.reviewedAt;
+    if (!needsReview) return false;
+    const wasPending = m?.state === 'pending';
+    product.moderation = { state: 'pending' };
+    return !wasPending;
+  }
+
   /** Chuỗi tìm kiếm đã bỏ dấu, gom từ mọi phần chữ của sản phẩm. */
   private syncSearchText(product: ProductDocument, categoryName?: string) {
     product.searchText = buildSearchText([
@@ -219,7 +248,7 @@ export class ProductsService {
   private scheduleEmbedding(product: ProductDocument, categoryName?: string) {
     const text = buildEmbedText(product, categoryName);
     void this.embedding
-      .embedAndStore(product._id as Types.ObjectId, text, product.name)
+      .embedAndStore(product._id, text, product.name)
       .catch(() => undefined);
   }
 
@@ -238,6 +267,7 @@ export class ProductsService {
     const images = dto.images ?? [];
     this.assertHasImage(images, dto.variants);
 
+    const status = dto.status ?? 'draft';
     const product = new this.productModel({
       shop: shop._id,
       name: dto.name,
@@ -252,14 +282,21 @@ export class ProductsService {
       video: dto.video,
       attributes: dto.attributes ?? [],
       shipping: dto.shipping ?? {},
-      status: dto.status ?? 'draft',
-      publishedAt: dto.status === 'active' ? new Date() : undefined,
+      status,
+      publishedAt: status === 'active' ? new Date() : undefined,
     });
 
     this.syncDerived(product);
     this.syncSearchText(product, category.name);
+    // Sản phẩm mới bao giờ cũng coi như "nội dung vừa đổi" — đăng bán ngay là phải chờ AI xét.
+    const shouldQueueReview = this.gateModerationOnPublish(
+      product,
+      status,
+      true,
+    );
     await product.save();
     this.scheduleEmbedding(product, category.name);
+    if (shouldQueueReview) this.moderation.queueReview(product._id);
     return { ok: true, id: String(product._id) };
   }
 
@@ -319,6 +356,7 @@ export class ProductsService {
         totalStock: p.totalStock,
         sold: p.stats?.sold ?? 0,
         status: p.status,
+        moderation: p.moderation,
         variantCount: p.variants?.length ?? 0,
         /**
          * Khuyến mãi ĐANG chạy. Thiếu nó thì danh sách ghi giá niêm yết trong
@@ -401,6 +439,18 @@ export class ProductsService {
   async update(user: UserDocument, id: string, dto: UpdateProductDto) {
     const product = await this.findOwned(user, id);
 
+    // Đổi các trường này coi là "nội dung" — đủ để buộc xét duyệt lại nếu sản
+    // phẩm đang/sắp active. Giá/kho/vận chuyển/biến thể KHÔNG tính, vì seller
+    // sửa giá-kho hàng ngày mà cứ bị ẩn tạm để chờ AI thì quá phiền (đã xác
+    // nhận với người dùng — chỉ ảnh/tên/mô tả/ngành hàng mới bắt duyệt lại).
+    const contentChanged =
+      dto.name !== undefined ||
+      dto.description !== undefined ||
+      dto.images !== undefined ||
+      dto.video !== undefined ||
+      dto.attributes !== undefined ||
+      dto.categoryId !== undefined;
+
     let categoryName: string | undefined;
     if (dto.categoryId) {
       const category = await this.categories.resolveForProduct(dto.categoryId);
@@ -439,17 +489,20 @@ export class ProductsService {
       product.shipping = { ...product.shipping, ...dto.shipping };
     }
     if (dto.status !== undefined) {
-      // Bị kiểm duyệt từ chối thì không được tự đăng bán lại.
-      if (dto.status === 'active' && product.moderation?.state === 'rejected') {
-        throw new BadRequestException(
-          'Sản phẩm đang bị từ chối kiểm duyệt nên chưa thể đăng bán. Vui lòng chỉnh sửa theo phản hồi của quản trị viên.',
-        );
-      }
       if (dto.status === 'active' && !product.publishedAt) {
         product.publishedAt = new Date();
       }
       product.status = dto.status as typeof product.status;
     }
+
+    // Xét NGAY CẢ KHI request này không đổi `status`: sửa ảnh/tên trên một sản
+    // phẩm đang active sẵn cũng phải bị ẩn tạm chờ duyệt lại, không chỉ lúc
+    // seller chủ động bấm đăng bán.
+    const shouldQueueReview = this.gateModerationOnPublish(
+      product,
+      product.status,
+      contentChanged,
+    );
 
     this.syncDerived(product);
     // So chuỗi tìm kiếm trước/sau: chỉ khi phần CHỮ đổi mới cần nhúng lại vector
@@ -460,6 +513,7 @@ export class ProductsService {
     if (product.searchText !== prevSearch) {
       this.scheduleEmbedding(product, categoryName);
     }
+    if (shouldQueueReview) this.moderation.queueReview(product._id);
     return { ok: true };
   }
 

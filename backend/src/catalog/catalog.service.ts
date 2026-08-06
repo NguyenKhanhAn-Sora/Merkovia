@@ -30,7 +30,7 @@ const SORTS: Record<string, Record<string, 1 | -1>> = {
  *
  * Mọi truy vấn ở đây đều phải qua ba lớp lọc, thiếu một lớp là lộ hàng không
  * được phép bán:
- *  1. Sản phẩm: `status: active`, chưa xoá, không bị kiểm duyệt từ chối.
+ *  1. Sản phẩm: `status: active`, chưa xoá, đã qua kiểm duyệt (`moderation.state: ok`).
  *  2. Gian hàng: đang `active` và KHÔNG ở chế độ tạm nghỉ.
  *  3. Biến thể: bỏ tổ hợp đã tắt (nếu không người mua chọn được hàng không có).
  */
@@ -47,12 +47,17 @@ export class CatalogService {
     private readonly jwt: JwtService,
   ) {}
 
-  /** Điều kiện lọc sản phẩm được phép hiển thị công khai. */
+  /**
+   * Điều kiện lọc sản phẩm được phép hiển thị công khai. `moderation.state`
+   * phải là `ok` — không chỉ loại `rejected`, mà cả `pending` (đang chờ AI xét
+   * lần đầu hoặc xét lại sau khi sửa nội dung) cũng phải ẩn khỏi buyer, xem
+   * `ProductsService.gateModerationOnPublish`.
+   */
   private get visibleProductMatch() {
     return {
       status: 'active',
       deletedAt: null,
-      'moderation.state': { $ne: 'rejected' },
+      'moderation.state': 'ok',
     } as const;
   }
 

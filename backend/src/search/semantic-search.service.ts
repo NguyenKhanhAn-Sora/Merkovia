@@ -143,7 +143,7 @@ export class SemanticSearchService {
         .find({
           status: 'active',
           deletedAt: null,
-          'moderation.state': { $ne: 'rejected' },
+          'moderation.state': 'ok',
           embeddingModel: this.embedding.model,
           embedding: { $exists: true, $ne: [] },
         })

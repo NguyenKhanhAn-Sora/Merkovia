@@ -251,13 +251,29 @@ export class Product {
   @Prop({ type: String, enum: PRODUCT_STATUS, default: 'draft', index: true })
   status: ProductStatus;
 
-  /** Kiểm duyệt phản ứng: mặc định `ok`, admin chuyển `rejected` khi vi phạm. */
+  /**
+   * Cổng kiểm duyệt TRƯỚC KHI hiển thị: sản phẩm mới đăng hoặc vừa sửa nội
+   * dung quan trọng (ảnh/tên/mô tả/ngành hàng) chuyển về `pending`, AI xét
+   * duyệt trong ít phút — chỉ `ok` mới lên trang buyer (xem
+   * `CatalogService.visibleProductMatch`). `reviewedBy` phân biệt quyết định
+   * của AI hay admin ghi đè tay; lịch sử đầy đủ nằm ở `ModerationLog`.
+   */
   @Prop({
-    type: { state: String, reason: String },
+    type: {
+      state: String,
+      reason: String,
+      reviewedAt: Date,
+      reviewedBy: String,
+    },
     default: () => ({ state: 'ok' }),
     _id: false,
   })
-  moderation: { state: ModerationState; reason?: string };
+  moderation: {
+    state: ModerationState;
+    reason?: string;
+    reviewedAt?: Date;
+    reviewedBy?: 'ai' | 'admin';
+  };
 
   @Prop()
   publishedAt?: Date;

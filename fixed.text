@@ -13,11 +13,9 @@ các việc liên quan đến tiền bạc và pháp luật nhà nước, có c�
  shop biết. Sản phẩm nào bị vi phạm thì cũng hiển thị state lên để shop biết và đăng lại sao cho phù hợp
 không, hình ảnh có phù hợp với tiêu đề không, hay là hình ảnh bị  vi phạm 
 chính sách không
+- AI tự động duyệt hàng thì có cần lưu lại lịch sử không, admin có thể chỉ động duyệt bất cứ lúc 
+nào không? nếu AI duyệt sai thì phải làm sao?
 - giờ đã làm trang người bán và người mua rồi, còn trung gian thì sao chúng 
 ta phải giải quyết thế nào, kiểu như trung gian là người lấy hàng giao hàng 
 và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, có cần làm 1 app riêng không?
 - có nên làm chức năng report 1 buyer nào đó không, ý kiến của bạn thế nao?
-- trong đơn report 1 shop nào đó thì admin xem report chỉ biết được các lý do mà 
-shop bị report thôi chưa có cơ sở nào để xác nhận rằng shop đó có vi phạm hay không, làm sao dể admin xác nhận rằng shop có vi phạm hay không? 
-làm sao để hỗ trợ admin nhanh chóng xác nhận, các hệ thống thương mại lớn khác như 
-amazon hay shopee họ làm thế nào?
