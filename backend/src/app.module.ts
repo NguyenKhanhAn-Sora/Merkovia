@@ -27,6 +27,8 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { ChatModule } from './chat/chat.module';
 import { CartModule } from './cart/cart.module';
 import { ShopReportsModule } from './shop-reports/shop-reports.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
+import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { config } from './config/config';
 
 @Module({
@@ -58,6 +60,8 @@ import { config } from './config/config';
     AuthModule,
     AdminAuthModule,
     ShopReportsModule,
+    AuditLogModule,
+    AdminDashboardModule,
   ],
   controllers: [AppController],
   // Đếm theo phiên đăng nhập, không theo IP — nhiều người dùng chung một IP

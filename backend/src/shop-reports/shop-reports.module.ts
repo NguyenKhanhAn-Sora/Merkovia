@@ -15,6 +15,7 @@ import { ProductsModule } from '../products/products.module';
 import { AuthModule } from '../auth/auth.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 /** Người mua báo cáo gian hàng vi phạm; admin xem hàng đợi ưu tiên và xử lý. */
 @Module({
@@ -30,6 +31,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     AuthModule, // JwtAuthGuard (người mua) + MailService
     AdminAuthModule, // AdminAuthGuard (trang quản trị)
     NotificationsModule, // báo vi phạm real-time cho gian hàng
+    AuditLogModule, // ghi nhật ký khi admin xử lý report/gỡ đình chỉ
   ],
   controllers: [ShopReportsController, AdminShopReportsController],
   providers: [ShopReportsService, ShopSuspensionService],

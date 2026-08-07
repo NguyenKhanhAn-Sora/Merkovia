@@ -42,6 +42,7 @@ import { isDealLive } from '../products/deal';
 import { shortId } from '../common/text';
 import { config } from '../config/config';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 
@@ -139,6 +140,7 @@ export class OrdersService {
     private readonly payments: PaymentService,
     private readonly shipping: ShippingProvider,
     private readonly notifications: NotificationsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   /** Mô tả ngắn các món trong đơn cho nội dung thông báo. */
@@ -510,6 +512,14 @@ export class OrdersService {
       if (!product || product.deletedAt || product.status !== 'active') {
         throw new ConflictException(
           `"${product?.name ?? 'Một sản phẩm trong giỏ'}" đã ngừng bán hoặc bị gỡ.`,
+        );
+      }
+      // Sản phẩm có thể đã bị chuyển về chờ duyệt/từ chối SAU KHI buyer thêm
+      // vào giỏ (vd seller sửa ảnh) — phải chặn ở đây, không chỉ ở giỏ hàng,
+      // vì đây là lớp phòng thủ cuối cùng trước khi đơn thật sự được tạo.
+      if (product.moderation?.state !== 'ok') {
+        throw new ConflictException(
+          `"${product.name}" đang chờ kiểm duyệt hoặc chưa đạt yêu cầu, chưa thể đặt mua.`,
         );
       }
 
@@ -954,6 +964,14 @@ export class OrdersService {
     this.logger.log(
       `Admin ${admin.id} xử lý yêu cầu huỷ đơn ${order.orderCode} thay gian hàng đang bị đình chỉ.`,
     );
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: approve
+        ? 'Duyệt yêu cầu huỷ đơn (thay shop đình chỉ)'
+        : 'Từ chối yêu cầu huỷ đơn (thay shop đình chỉ)',
+      targetLabel: order.orderCode,
+      detail: note,
+    });
     return this.resolveCancelRequest(order, approve, note, 'admin');
   }
 
@@ -1401,6 +1419,14 @@ export class OrdersService {
     this.logger.log(
       `Admin ${admin.id} xử lý yêu cầu trả hàng đơn ${order.orderCode} thay gian hàng đang bị đình chỉ.`,
     );
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: approve
+        ? 'Duyệt yêu cầu trả hàng (thay shop đình chỉ)'
+        : 'Từ chối yêu cầu trả hàng (thay shop đình chỉ)',
+      targetLabel: order.orderCode,
+      detail: note,
+    });
     return this.resolveReturnRequest(order, approve, note, 'admin');
   }
 

@@ -66,10 +66,15 @@ export class CartService {
       // kiện chặn ở lúc đặt hàng (`OrdersService.buildGroups`), để giỏ hàng
       // báo mờ ngay từ đây thay vì để người mua bất ngờ khi bấm thanh toán.
       const shopOpen = !!shop && shop.status === 'active' && !shop.vacationMode;
+      // Sản phẩm đang chờ AI xét hoặc bị từ chối (kể cả khi đã nằm sẵn trong
+      // giỏ TRƯỚC KHI bị chuyển trạng thái, vd seller sửa ảnh) không được coi
+      // là còn mua được — khớp đúng cổng hiển thị buyer ở CatalogService.
+      const moderationOk = product?.moderation?.state === 'ok';
       const live =
         !!product &&
         product.status === 'active' &&
         !product.deletedAt &&
+        moderationOk &&
         !!variant &&
         variant.isActive &&
         shopOpen;
@@ -112,6 +117,7 @@ export class CartService {
       _id: productId,
       status: 'active',
       deletedAt: null,
+      'moderation.state': 'ok',
     });
     const variant = product?.variants?.find(
       (v) => String(v._id) === variantId && v.isActive,

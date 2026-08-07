@@ -26,6 +26,7 @@ import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MailService } from '../auth/mail.service';
 import { ShopSuspensionService } from './shop-suspension.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import { config } from '../config/config';
 
@@ -162,6 +163,7 @@ export class ShopReportsService {
     private readonly notifications: NotificationsService,
     private readonly mail: MailService,
     private readonly suspension: ShopSuspensionService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   /* -------------------------------- Người mua ------------------------------- */
@@ -584,6 +586,18 @@ export class ShopReportsService {
       );
     }
 
+    const ACTION_LABEL: Record<typeof dto.action, string> = {
+      warning: 'Cảnh cáo gian hàng',
+      suspend: 'Đình chỉ gian hàng',
+      dismiss: 'Bỏ qua báo cáo',
+    };
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: ACTION_LABEL[dto.action],
+      targetLabel: shop.name,
+      detail: `${pending.length} báo cáo${resolution.note ? ` — ${resolution.note}` : ''}`,
+    });
+
     return { ok: true, resolvedCount: pending.length };
   }
 
@@ -614,6 +628,11 @@ export class ShopReportsService {
       link: '/settings',
     });
     this.logger.log(`Admin ${admin.id} đã gỡ đình chỉ sớm cho shop ${shopId}.`);
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: 'Gỡ đình chỉ gian hàng',
+      targetLabel: shop.name,
+    });
 
     return { ok: true };
   }

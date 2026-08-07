@@ -14,6 +14,7 @@ import {
 } from './schemas/moderation-log.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 
 /** Tối đa số ảnh gửi cho AI mỗi lượt xét — vừa đủ để nhận diện vi phạm, vừa giữ chi phí/độ trễ trong tầm. */
@@ -49,6 +50,7 @@ export class ProductModerationService {
     private readonly logModel: Model<ModerationLogDocument>,
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
     private readonly notifications: NotificationsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private isEnabled(): boolean {
@@ -438,7 +440,7 @@ Trả lời bằng tiếng Việt, ngắn gọn, đúng định dạng JSON yêu
     }
     const product = await this.productModel
       .findById(productId)
-      .select('shop')
+      .select('shop name')
       .lean();
     if (!product) throw new NotFoundException('Không tìm thấy sản phẩm.');
 
@@ -450,6 +452,15 @@ Trả lời bằng tiếng Việt, ngắn gọn, đúng định dạng JSON yêu
       'admin',
       { adminEmail: admin.email },
     );
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action:
+        action === 'approve'
+          ? 'Duyệt sản phẩm (tay)'
+          : 'Từ chối sản phẩm (tay)',
+      targetLabel: product.name,
+      detail: reason?.trim(),
+    });
     return { ok: true };
   }
 }

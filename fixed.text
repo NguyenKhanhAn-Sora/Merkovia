@@ -2,18 +2,7 @@
 - tôi muốn tham khảo ý kiến của bạn về vấn đề xác thực sinh trắc học của 
 buyer và seller để đề phòng các trường hợp lừa đảo và nhằm phục vụ cho 
 các việc liên quan đến tiền bạc và pháp luật nhà nước, có cần thiết không?
-- Khi đăng các sản phẩm mới lên tôi muốn các sản phẩm của shop đầu tiên sẽ được đưa vào state đang chờ phê duyệt trước,
- và sẽ được duyệt tự động bằng AI, đại khái là sẽ dành 1 chút thời gian cho AI xem 
- xét các thogn6 tin như hình ảnh, tên sản phẩm, ngành hàng, mô tả,.. tất cả những gì 
- liên quan đến sản phẩm đó xem có đúng với tiêu chuẩn của web không, có vi phạm 
- gì không, có đúng ngành hàng mà họ đăng không, có ngôn từ gì không phù hợp với sản 
- phẩm họ đăng hay không, các thông tin có ăn khớp với nhau không,... sau khi duyệt 
- xong hết và AI xác nahn65 là phù hợp và không vi phạm thì sản phẩm mới chính thức 
- chuyển sang state được trưng bày trên buyer, sản phẩm đang ở sate nào thì hiển thị trạng thái tương ứng để cho 
- shop biết. Sản phẩm nào bị vi phạm thì cũng hiển thị state lên để shop biết và đăng lại sao cho phù hợp
-không, hình ảnh có phù hợp với tiêu đề không, hay là hình ảnh bị  vi phạm 
-chính sách không
-- AI tự động duyệt hàng thì có cần lưu lại lịch sử không, admin có thể chỉ động duyệt bất cứ lúc 
+- AI tự động duyệt hàng thì có cần lưu lại lịch sử không, admin có thể chủ động duyệt bất cứ lúc 
 nào không? nếu AI duyệt sai thì phải làm sao?
 - giờ đã làm trang người bán và người mua rồi, còn trung gian thì sao chúng 
 ta phải giải quyết thế nào, kiểu như trung gian là người lấy hàng giao hàng 

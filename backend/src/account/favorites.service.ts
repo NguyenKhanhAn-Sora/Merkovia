@@ -74,7 +74,7 @@ export class FavoritesService {
         .populate<{ product: ProductDocument }>({
           path: 'product',
           select:
-            'name slug images priceMin priceMax totalStock status deletedAt stats activeDeal shop',
+            'name slug images priceMin priceMax totalStock status moderation deletedAt stats activeDeal shop',
           populate: { path: 'shop', select: 'name slug status vacationMode' },
         }),
       this.favoriteModel.countDocuments(filter),
@@ -105,9 +105,14 @@ export class FavoritesService {
           ratingAvg: p.stats?.ratingAvg ?? 0,
           ratingCount: p.stats?.ratingCount ?? 0,
           shop: { name: shop?.name, slug: shop?.slug },
-          /** Còn mua được không — hàng đã gỡ hoặc gian hàng tạm nghỉ/bị đình
-           *  chỉ vẫn hiện nhưng mờ đi, khớp điều kiện chặn lúc đặt hàng. */
-          available: p.status === 'active' && !p.deletedAt && shopOpen,
+          /** Còn mua được không — hàng đã gỡ, đang chờ/bị từ chối kiểm duyệt,
+           *  hoặc gian hàng tạm nghỉ/bị đình chỉ vẫn hiện nhưng mờ đi, khớp
+           *  điều kiện chặn lúc đặt hàng. */
+          available:
+            p.status === 'active' &&
+            !p.deletedAt &&
+            p.moderation?.state === 'ok' &&
+            shopOpen,
         };
       })
       .filter(Boolean);

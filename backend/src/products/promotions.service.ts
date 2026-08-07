@@ -84,6 +84,11 @@ export class PromotionsService {
         'Chỉ đặt khuyến mãi được cho sản phẩm đang bán.',
       );
     }
+    if (product.moderation?.state !== 'ok') {
+      throw new BadRequestException(
+        'Sản phẩm đang chờ kiểm duyệt hoặc chưa đạt yêu cầu, chưa thể đặt khuyến mãi.',
+      );
+    }
     if (product.priceMin <= 0) {
       throw new BadRequestException(
         'Sản phẩm chưa có phân loại nào đang bán để đặt khuyến mãi.',

@@ -20,6 +20,7 @@ import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { MediaModule } from '../media/media.module';
 import { SearchModule } from '../search/search.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     MediaModule, // xoá ảnh R2 khi dọn thùng rác
     SearchModule, // sinh vector embedding khi tạo/sửa sản phẩm
     NotificationsModule, // báo seller khi AI/admin duyệt hoặc từ chối sản phẩm
+    AuditLogModule, // ghi nhật ký khi admin duyệt/từ chối sản phẩm tay
   ],
   controllers: [
     ProductsController,

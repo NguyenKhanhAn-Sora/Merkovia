@@ -15,6 +15,7 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { AuthModule } from '../auth/auth.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     AuthModule, // JwtAuthGuard
     AdminAuthModule, // AdminAuthGuard (xử lý tranh chấp thay shop bị đình chỉ)
     NotificationsModule, // báo tin đơn hàng cho hai phía
+    AuditLogModule, // ghi nhật ký khi admin xử lý tranh chấp thay shop bị đình chỉ
   ],
   controllers: [OrdersController, ShopOrdersController, AdminOrdersController],
   providers: [OrdersService],
