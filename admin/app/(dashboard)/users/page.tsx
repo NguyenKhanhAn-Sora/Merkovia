@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { LockKey, LockKeyOpen, MagnifyingGlass } from "@phosphor-icons/react";
+import { LockKey, MagnifyingGlass } from "@phosphor-icons/react";
 import {
   Badge,
   DataTable,
@@ -27,12 +27,22 @@ const ROLE_LABEL: Record<UserRole, string> = {
   admin: "Quản trị",
 };
 
-const STATUS_BADGE: Record<string, { label: string; tone: BadgeTone }> = {
-  active: { label: "Đang hoạt động", tone: "success" },
-  pending: { label: "Chờ xác thực", tone: "warning" },
-  suspended: { label: "Đã khoá", tone: "danger" },
-  deleted: { label: "Đã xoá", tone: "neutral" },
-};
+/** Trạng thái hiển thị có thể là NHIỀU badge cùng lúc (vd vừa cấm mua vừa cấm bán). */
+function statusBadges(u: AdminUserListItem): { label: string; tone: BadgeTone }[] {
+  if (u.status === "suspended") return [{ label: "Khoá toàn bộ", tone: "danger" }];
+  if (u.status === "deleted") return [{ label: "Đã xoá", tone: "neutral" }];
+  const badges: { label: string; tone: BadgeTone }[] = [];
+  if (u.buyerLocked) badges.push({ label: "Cấm mua", tone: "danger" });
+  if (u.sellerLocked) badges.push({ label: "Cấm bán", tone: "danger" });
+  if (badges.length === 0) {
+    badges.push(
+      u.status === "pending"
+        ? { label: "Chờ xác thực", tone: "warning" }
+        : { label: "Đang hoạt động", tone: "success" },
+    );
+  }
+  return badges;
+}
 
 export default function UsersPage() {
   const [tab, setTab] = useState<UserTab>("all");
@@ -41,7 +51,7 @@ export default function UsersPage() {
 
   const [data, setData] = useState<AdminUserListResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [modalUser, setModalUser] = useState<{ user: AdminUserListItem; mode: "lock" | "unlock" } | null>(null);
+  const [modalUser, setModalUser] = useState<AdminUserListItem | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,56 +118,49 @@ export default function UsersPage() {
           <p className="py-16 text-center text-[13.5px] text-star/40">Không có tài khoản nào ở mục này.</p>
         ) : (
           <DataTable columns={["Người dùng", "Liên hệ", "Vai trò", "Trạng thái", "Ngày tham gia", ""]}>
-            {(data?.items ?? []).map((u) => {
-              const badge = STATUS_BADGE[u.status] ?? STATUS_BADGE.active;
-              return (
-                <tr key={u.id}>
-                  <Td className="font-medium text-star/85">
-                    {u.name || "—"}
-                    {u.shop && <span className="ml-1.5 text-star/40">({u.shop.name})</span>}
-                  </Td>
-                  <Td className="text-star/60">{u.email || u.phone || "—"}</Td>
-                  <Td>
-                    <span className="flex flex-wrap gap-1.5">
-                      {u.roles
-                        .filter((r) => r !== "admin")
-                        .map((r) => (
-                          <Badge key={r} tone="info">
-                            {ROLE_LABEL[r]}
-                          </Badge>
-                        ))}
-                    </span>
-                  </Td>
-                  <Td>
-                    <Badge tone={badge.tone}>{badge.label}</Badge>
-                  </Td>
-                  <Td className="text-star/50">
-                    {u.createdAt
-                      ? new Date(u.createdAt).toLocaleDateString("vi-VN", { dateStyle: "short" })
-                      : "—"}
-                  </Td>
-                  <Td>
-                    {u.status === "suspended" ? (
-                      <GhostButton
-                        icon={LockKeyOpen}
-                        onClick={() => setModalUser({ user: u, mode: "unlock" })}
-                        className="h-9 px-3 text-[13px]"
-                      >
-                        Gỡ khoá
-                      </GhostButton>
-                    ) : (
-                      <GhostButton
-                        icon={LockKey}
-                        onClick={() => setModalUser({ user: u, mode: "lock" })}
-                        className="h-9 px-3 text-[13px] text-rose-300 hover:text-rose-200"
-                      >
-                        Khoá
-                      </GhostButton>
-                    )}
-                  </Td>
-                </tr>
-              );
-            })}
+            {(data?.items ?? []).map((u) => (
+              <tr key={u.id}>
+                <Td className="font-medium text-star/85">
+                  {u.name || "—"}
+                  {u.shop && <span className="ml-1.5 text-star/40">({u.shop.name})</span>}
+                </Td>
+                <Td className="text-star/60">{u.email || u.phone || "—"}</Td>
+                <Td>
+                  <span className="flex flex-wrap gap-1.5">
+                    {u.roles
+                      .filter((r) => r !== "admin")
+                      .map((r) => (
+                        <Badge key={r} tone="info">
+                          {ROLE_LABEL[r]}
+                        </Badge>
+                      ))}
+                  </span>
+                </Td>
+                <Td>
+                  <span className="flex flex-wrap gap-1.5">
+                    {statusBadges(u).map((b) => (
+                      <Badge key={b.label} tone={b.tone}>
+                        {b.label}
+                      </Badge>
+                    ))}
+                  </span>
+                </Td>
+                <Td className="text-star/50">
+                  {u.createdAt
+                    ? new Date(u.createdAt).toLocaleDateString("vi-VN", { dateStyle: "short" })
+                    : "—"}
+                </Td>
+                <Td>
+                  <GhostButton
+                    icon={LockKey}
+                    onClick={() => setModalUser(u)}
+                    className="h-9 px-3 text-[13px]"
+                  >
+                    Quản lý khoá
+                  </GhostButton>
+                </Td>
+              </tr>
+            ))}
           </DataTable>
         )}
 
@@ -190,8 +193,7 @@ export default function UsersPage() {
 
       {modalUser && (
         <UserLockModal
-          user={modalUser.user}
-          mode={modalUser.mode}
+          user={modalUser}
           onClose={() => setModalUser(null)}
           onDone={() => void load()}
         />

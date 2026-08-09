@@ -210,7 +210,7 @@ export class AuthController {
   ) {
     const token = readAccessToken(req);
     const { accessToken, refreshToken, user } =
-      await this.accountService.openShop(token, dto);
+      await this.accountService.openShop(token, dto, scopeFromRequest(req));
     // Giữ đăng nhập với phiên mới (đã có role seller). Cookie bền như phiên trước.
     this.setAuthCookies(req, res, accessToken, refreshToken, true);
     return { user };
@@ -224,10 +224,18 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { accessToken, refreshToken, user } =
-      await this.accountService.login(dto);
+    const { accessToken, refreshToken, user } = await this.accountService.login(
+      dto,
+      scopeFromRequest(req),
+    );
     // Token đặt trong cookie httpOnly — KHÔNG trả về body (chống XSS đánh cắp).
-    this.setAuthCookies(req, res, accessToken, refreshToken, dto.remember ?? false);
+    this.setAuthCookies(
+      req,
+      res,
+      accessToken,
+      refreshToken,
+      dto.remember ?? false,
+    );
     return { user };
   }
 
@@ -244,7 +252,10 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.accountService.googleAuth(dto);
+    const result = await this.accountService.googleAuth(
+      dto,
+      scopeFromRequest(req),
+    );
     if (result.needsProfile) {
       return {
         needsProfile: true,
@@ -271,8 +282,14 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken, user } =
-      await this.accountService.loginWithPhone(dto);
-    this.setAuthCookies(req, res, accessToken, refreshToken, dto.remember ?? false);
+      await this.accountService.loginWithPhone(dto, scopeFromRequest(req));
+    this.setAuthCookies(
+      req,
+      res,
+      accessToken,
+      refreshToken,
+      dto.remember ?? false,
+    );
     return { user };
   }
 
@@ -320,9 +337,11 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    const scope = scopeFromRequest(req);
     const { accessToken, refreshToken, user } =
       await this.accountService.refreshSession(
-        readCookie(req, refreshCookieName(scopeFromRequest(req))),
+        readCookie(req, refreshCookieName(scope)),
+        scope,
       );
     this.setAuthCookies(req, res, accessToken, refreshToken, true);
     return { user };

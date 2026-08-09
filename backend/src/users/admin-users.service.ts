@@ -13,7 +13,25 @@ import { ShopSuspensionService } from '../shop-reports/shop-suspension.service';
 import { MailService } from '../auth/mail.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
-import type { QueryAdminUsersDto } from './dto/admin-users.dto';
+import type { LockScope, QueryAdminUsersDto } from './dto/admin-users.dto';
+
+const SCOPE_LABEL: Record<LockScope, string> = {
+  buyer: 'mua hàng',
+  seller: 'bán hàng',
+  all: 'toàn bộ tài khoản',
+};
+
+const LOCK_ACTION_LABEL: Record<LockScope, string> = {
+  buyer: 'Cấm mua hàng',
+  seller: 'Cấm bán hàng',
+  all: 'Khoá toàn bộ tài khoản',
+};
+
+const UNLOCK_ACTION_LABEL: Record<LockScope, string> = {
+  buyer: 'Gỡ cấm mua hàng',
+  seller: 'Gỡ cấm bán hàng',
+  all: 'Gỡ khoá toàn bộ tài khoản',
+};
 
 /**
  * Quản lý tài khoản người dùng (buyer + seller) trong Kênh Quản trị — khác
@@ -43,7 +61,13 @@ export class AdminUsersService {
     const match: Record<string, unknown> = { deletedAt: null };
     if (tab === 'buyer') match.roles = 'buyer';
     if (tab === 'seller') match.roles = 'seller';
-    if (tab === 'locked') match.status = 'suspended';
+    if (tab === 'locked') {
+      match.$or = [
+        { status: 'suspended' },
+        { buyerLocked: true },
+        { sellerLocked: true },
+      ];
+    }
 
     if (query.q?.trim()) {
       const q = query.q.trim();
@@ -86,6 +110,8 @@ export class AdminUsersService {
           phone: u.phone,
           roles: u.roles,
           status: u.status,
+          buyerLocked: u.buyerLocked,
+          sellerLocked: u.sellerLocked,
           emailVerified: u.emailVerified,
           phoneVerified: u.phoneVerified,
           name: profile?.displayName || profile?.fullName,
@@ -106,11 +132,19 @@ export class AdminUsersService {
 
   private async countByTab() {
     const base = { deletedAt: null };
+    const lockedMatch: Record<string, unknown> = {
+      ...base,
+      $or: [
+        { status: 'suspended' },
+        { buyerLocked: true },
+        { sellerLocked: true },
+      ],
+    };
     const [all, buyer, seller, locked] = await Promise.all([
       this.userModel.countDocuments(base),
       this.userModel.countDocuments({ ...base, roles: 'buyer' }),
       this.userModel.countDocuments({ ...base, roles: 'seller' }),
-      this.userModel.countDocuments({ ...base, status: 'suspended' }),
+      this.userModel.countDocuments(lockedMatch),
     ]);
     return { all, buyer, seller, locked };
   }
@@ -135,6 +169,8 @@ export class AdminUsersService {
       phone: user.phone,
       roles: user.roles,
       status: user.status,
+      buyerLocked: user.buyerLocked,
+      sellerLocked: user.sellerLocked,
       emailVerified: user.emailVerified,
       phoneVerified: user.phoneVerified,
       name: profile?.displayName || profile?.fullName,
@@ -153,27 +189,52 @@ export class AdminUsersService {
   }
 
   /**
-   * Khoá tài khoản — có hiệu lực NGAY trên mọi phiên đã đăng nhập (xem
-   * `AccountService.userFromAccessToken`/`issueSession`). Nếu là seller và
-   * gian hàng CHƯA bị đình chỉ, đình chỉ luôn (vô thời hạn) — chủ shop không
-   * đăng nhập được thì không thể xác nhận/giao đơn, để shop "hiện active" mà
-   * không ai vận hành còn rủi ro hơn (đã xác nhận với người dùng).
+   * Khoá tài khoản theo VAI TRÒ — có hiệu lực NGAY trên mọi phiên đã đăng
+   * nhập (xem `AccountService.assertNotLocked`). `scope: 'buyer'` chỉ chặn
+   * app người mua (giữ nguyên quyền bán); `'seller'` chỉ chặn app người bán
+   * (giữ nguyên quyền mua); `'all'` chặn cả hai — dùng cho vấn đề DANH TÍNH
+   * (gian lận đăng nhập, lộ mật khẩu, yêu cầu pháp lý), không phải vi phạm
+   * riêng một vai trò.
+   *
+   * Đình chỉ gian hàng cascade CHỈ khi `scope` chặn được app seller (`seller`
+   * hoặc `all`) — chủ shop không đăng nhập được thì không thể vận hành, để
+   * shop "hiện active" mà không ai xử lý còn rủi ro hơn. Khoá vì lý do MUA
+   * hàng (`scope: 'buyer'`) không đụng tới gian hàng — họ vẫn bán bình thường.
    */
-  async lock(admin: AdminPrincipal, id: string, reason: string) {
+  async lock(
+    admin: AdminPrincipal,
+    id: string,
+    reason: string,
+    scope: LockScope,
+  ) {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Không tìm thấy tài khoản.');
     }
     const user = await this.userModel.findOne({ _id: id, deletedAt: null });
     if (!user) throw new NotFoundException('Không tìm thấy tài khoản.');
-    if (user.status === 'suspended') {
-      throw new BadRequestException('Tài khoản này đã bị khoá rồi.');
+
+    const alreadyLocked =
+      scope === 'all'
+        ? user.status === 'suspended'
+        : scope === 'buyer'
+          ? user.buyerLocked
+          : user.sellerLocked;
+    if (alreadyLocked) {
+      throw new BadRequestException(
+        `Tài khoản này đã bị hạn chế "${SCOPE_LABEL[scope]}" rồi.`,
+      );
     }
 
-    user.status = 'suspended';
+    if (scope === 'all') user.status = 'suspended';
+    if (scope === 'buyer') user.buyerLocked = true;
+    if (scope === 'seller') user.sellerLocked = true;
     user.tokenVersion = (user.tokenVersion ?? 0) + 1; // thu hồi mọi phiên đang đăng nhập
     await user.save();
 
-    if (user.roles.includes('seller')) {
+    if (
+      (scope === 'seller' || scope === 'all') &&
+      user.roles.includes('seller')
+    ) {
       const shop = await this.shopModel.findOne({ owner: user._id });
       if (shop && shop.status !== 'suspended') {
         shop.status = 'suspended';
@@ -181,14 +242,18 @@ export class AdminUsersService {
         await shop.save();
         await this.suspension.cancel(String(shop._id));
         this.logger.log(
-          `Khoá tài khoản seller ${id} → tự động đình chỉ gian hàng ${String(shop._id)}.`,
+          `Khoá tài khoản (${scope}) ${id} → tự động đình chỉ gian hàng ${String(shop._id)}.`,
         );
       }
     }
 
     if (user.email) {
       await this.mail
-        .sendAccountStatusNotice(user.email, { action: 'lock', reason })
+        .sendAccountStatusNotice(user.email, {
+          action: 'lock',
+          scopeLabel: SCOPE_LABEL[scope],
+          reason,
+        })
         .catch((e: unknown) =>
           this.logger.warn(`Gửi email khoá tài khoản thất bại: ${String(e)}`),
         );
@@ -196,7 +261,7 @@ export class AdminUsersService {
 
     await this.auditLog.log({
       adminEmail: admin.email,
-      action: 'Khoá tài khoản',
+      action: LOCK_ACTION_LABEL[scope],
       targetLabel: user.email ?? user.phone ?? id,
       detail: reason,
     });
@@ -205,26 +270,40 @@ export class AdminUsersService {
   }
 
   /**
-   * Gỡ khoá — CHỈ mở lại tài khoản, KHÔNG tự động gỡ đình chỉ gian hàng (nếu
-   * có) vì shop có thể đang bị đình chỉ vì một lý do KHÁC (report riêng) —
-   * admin cần vào trang Gian hàng xem xét gỡ riêng nếu phù hợp.
+   * Gỡ khoá ĐÚNG scope đã khoá — KHÔNG tự động gỡ đình chỉ gian hàng (nếu có)
+   * dù `scope` là `seller`/`all`, vì shop có thể đang bị đình chỉ vì một lý
+   * do KHÁC (report riêng) — admin cần vào trang Gian hàng xem xét gỡ riêng.
    */
-  async unlock(admin: AdminPrincipal, id: string) {
+  async unlock(admin: AdminPrincipal, id: string, scope: LockScope) {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Không tìm thấy tài khoản.');
     }
     const user = await this.userModel.findOne({ _id: id, deletedAt: null });
     if (!user) throw new NotFoundException('Không tìm thấy tài khoản.');
-    if (user.status !== 'suspended') {
-      throw new BadRequestException('Tài khoản này hiện không bị khoá.');
+
+    const isLocked =
+      scope === 'all'
+        ? user.status === 'suspended'
+        : scope === 'buyer'
+          ? user.buyerLocked
+          : user.sellerLocked;
+    if (!isLocked) {
+      throw new BadRequestException(
+        `Tài khoản này hiện không bị hạn chế "${SCOPE_LABEL[scope]}".`,
+      );
     }
 
-    user.status = 'active';
+    if (scope === 'all') user.status = 'active';
+    if (scope === 'buyer') user.buyerLocked = false;
+    if (scope === 'seller') user.sellerLocked = false;
     await user.save();
 
     if (user.email) {
       await this.mail
-        .sendAccountStatusNotice(user.email, { action: 'unlock' })
+        .sendAccountStatusNotice(user.email, {
+          action: 'unlock',
+          scopeLabel: SCOPE_LABEL[scope],
+        })
         .catch((e: unknown) =>
           this.logger.warn(
             `Gửi email gỡ khoá tài khoản thất bại: ${String(e)}`,
@@ -234,7 +313,7 @@ export class AdminUsersService {
 
     await this.auditLog.log({
       adminEmail: admin.email,
-      action: 'Gỡ khoá tài khoản',
+      action: UNLOCK_ACTION_LABEL[scope],
       targetLabel: user.email ?? user.phone ?? id,
     });
 

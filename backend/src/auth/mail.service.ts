@@ -132,7 +132,11 @@ export class MailService {
    */
   async sendAccountStatusNotice(
     to: string,
-    params: { action: 'lock' | 'unlock'; reason?: string },
+    params: {
+      action: 'lock' | 'unlock';
+      scopeLabel: string;
+      reason?: string;
+    },
   ): Promise<void> {
     try {
       await this.transporter.sendMail({
@@ -141,8 +145,8 @@ export class MailService {
         replyTo: config.smtp.user,
         subject:
           params.action === 'lock'
-            ? 'Tài khoản Merkovia của bạn đã bị khoá'
-            : 'Tài khoản Merkovia của bạn đã được gỡ khoá',
+            ? `Tài khoản Merkovia của bạn đã bị hạn chế: ${params.scopeLabel}`
+            : `Đã gỡ hạn chế "${params.scopeLabel}" trên tài khoản Merkovia`,
         text: renderAccountStatusText(params),
         html: renderAccountStatusEmail(params),
       });

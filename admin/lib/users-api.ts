@@ -1,9 +1,11 @@
-/** Client cho trang "Người dùng" — quản lý tài khoản buyer/seller, khoá/gỡ khoá. */
+/** Client cho trang "Người dùng" — quản lý tài khoản buyer/seller, khoá/gỡ khoá theo vai trò. */
 import { apiFetch } from "./auth-api";
 
 export type UserTab = "all" | "buyer" | "seller" | "locked";
 export type UserRole = "buyer" | "seller" | "admin";
 export type UserStatus = "active" | "pending" | "suspended" | "deleted";
+/** `buyer` = chỉ cấm mua, `seller` = chỉ cấm bán (khác đình chỉ shop — vẫn cấm được đăng nhập), `all` = khoá toàn bộ tài khoản. */
+export type LockScope = "buyer" | "seller" | "all";
 
 export interface AdminUserListItem {
   id: string;
@@ -11,6 +13,8 @@ export interface AdminUserListItem {
   phone?: string;
   roles: UserRole[];
   status: UserStatus;
+  buyerLocked: boolean;
+  sellerLocked: boolean;
   emailVerified: boolean;
   phoneVerified: boolean;
   name?: string;
@@ -60,14 +64,22 @@ export function getUserDetail(id: string): Promise<AdminUserDetail> {
   return request(`/admin/users/${id}`);
 }
 
-export function lockUser(id: string, reason: string): Promise<{ ok: boolean }> {
+export function lockUser(
+  id: string,
+  reason: string,
+  scope: LockScope,
+): Promise<{ ok: boolean }> {
   return request(`/admin/users/${id}/lock`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reason }),
+    body: JSON.stringify({ reason, scope }),
   });
 }
 
-export function unlockUser(id: string): Promise<{ ok: boolean }> {
-  return request(`/admin/users/${id}/unlock`, { method: "POST" });
+export function unlockUser(id: string, scope: LockScope): Promise<{ ok: boolean }> {
+  return request(`/admin/users/${id}/unlock`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope }),
+  });
 }

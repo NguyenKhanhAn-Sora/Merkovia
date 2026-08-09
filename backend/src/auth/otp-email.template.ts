@@ -272,17 +272,23 @@ export function renderShopViolationText(params: {
   ].join('\n');
 }
 
-/** Báo tài khoản bị admin khoá/gỡ khoá — khác `renderShopViolationEmail` (đó là về GIAN HÀNG, đây là về TÀI KHOẢN đăng nhập). */
+/**
+ * Báo tài khoản bị admin khoá/gỡ khoá — khác `renderShopViolationEmail` (đó
+ * là về GIAN HÀNG, đây là về TÀI KHOẢN đăng nhập). `scopeLabel` mô tả đúng
+ * phạm vi bị hạn chế (vd "mua hàng", "bán hàng", "toàn bộ tài khoản") — khoá
+ * theo vai trò không nên đọc như khoá toàn bộ.
+ */
 export function renderAccountStatusEmail(params: {
   action: 'lock' | 'unlock';
+  scopeLabel: string;
   reason?: string;
 }): string {
-  const { action, reason } = params;
+  const { action, scopeLabel, reason } = params;
   const isLock = action === 'lock';
   return shell(
     isLock
-      ? 'Tài khoản Merkovia của bạn đã bị khoá.'
-      : 'Tài khoản Merkovia của bạn đã được gỡ khoá.',
+      ? `Tài khoản Merkovia của bạn đã bị hạn chế: ${scopeLabel}.`
+      : `Hạn chế "${scopeLabel}" trên tài khoản Merkovia của bạn đã được gỡ.`,
     `<tr>
       <td style="padding:20px 32px 0;">
         <p style="margin:0 0 14px;font-size:15px;line-height:1.6;">Xin chào,</p>
@@ -292,7 +298,7 @@ export function renderAccountStatusEmail(params: {
       <td style="padding:0 32px 0;">
         <div style="border-radius:10px;padding:14px 18px;background:${isLock ? '#fef2f2' : '#f0fdf4'};border:1px solid ${isLock ? '#fecaca' : '#bbf7d0'};">
           <p style="margin:0;font-size:14px;font-weight:700;color:${isLock ? '#b91c1c' : '#15803d'};">
-            ${isLock ? 'Tài khoản đã bị khoá' : 'Tài khoản đã được gỡ khoá'}
+            ${isLock ? `Đã hạn chế: ${scopeLabel}` : `Đã gỡ hạn chế: ${scopeLabel}`}
           </p>
           ${reason ? `<p style="margin:8px 0 0;font-size:14px;line-height:1.6;color:#4b5563;">${reason}</p>` : ''}
         </div>
@@ -303,8 +309,8 @@ export function renderAccountStatusEmail(params: {
         <p style="margin:0;font-size:14px;line-height:1.6;color:#4b5563;">
           ${
             isLock
-              ? 'Bạn sẽ không thể đăng nhập vào Merkovia cho đến khi tài khoản được gỡ khoá. Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
-              : 'Bạn có thể đăng nhập lại bình thường ngay bây giờ.'
+              ? 'Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
+              : 'Bạn có thể sử dụng lại phần bị hạn chế trên ngay bây giờ.'
           }
         </p>
       </td>
@@ -314,21 +320,22 @@ export function renderAccountStatusEmail(params: {
 
 export function renderAccountStatusText(params: {
   action: 'lock' | 'unlock';
+  scopeLabel: string;
   reason?: string;
 }): string {
-  const { action, reason } = params;
+  const { action, scopeLabel, reason } = params;
   const isLock = action === 'lock';
   return [
     'Xin chào,',
     '',
     isLock
-      ? 'Tài khoản Merkovia của bạn đã bị KHOÁ.'
-      : 'Tài khoản Merkovia của bạn đã được GỠ KHOÁ.',
+      ? `Tài khoản Merkovia của bạn đã bị HẠN CHẾ: ${scopeLabel}.`
+      : `Hạn chế "${scopeLabel}" trên tài khoản Merkovia của bạn đã được GỠ.`,
     reason ? `Lý do: ${reason}` : '',
     '',
     isLock
-      ? 'Bạn sẽ không thể đăng nhập cho đến khi tài khoản được gỡ khoá. Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
-      : 'Bạn có thể đăng nhập lại bình thường ngay bây giờ.',
+      ? 'Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
+      : 'Bạn có thể sử dụng lại phần bị hạn chế trên ngay bây giờ.',
     '',
     'Trân trọng,',
     'Đội ngũ Merkovia',

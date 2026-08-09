@@ -10,7 +10,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdminUsersService } from './admin-users.service';
-import { LockUserDto, QueryAdminUsersDto } from './dto/admin-users.dto';
+import {
+  LockUserDto,
+  QueryAdminUsersDto,
+  UnlockUserDto,
+} from './dto/admin-users.dto';
 import { AdminAuthGuard, CurrentAdmin } from '../admin-auth/admin-auth.guard';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 
@@ -36,12 +40,16 @@ export class AdminUsersController {
     @Param('id') id: string,
     @Body() dto: LockUserDto,
   ) {
-    return this.users.lock(admin, id, dto.reason);
+    return this.users.lock(admin, id, dto.reason, dto.scope);
   }
 
   @Post(':id/unlock')
   @HttpCode(HttpStatus.OK)
-  unlock(@CurrentAdmin() admin: AdminPrincipal, @Param('id') id: string) {
-    return this.users.unlock(admin, id);
+  unlock(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('id') id: string,
+    @Body() dto: UnlockUserDto,
+  ) {
+    return this.users.unlock(admin, id, dto.scope);
   }
 }

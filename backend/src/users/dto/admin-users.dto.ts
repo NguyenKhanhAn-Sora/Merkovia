@@ -34,7 +34,15 @@ export class QueryAdminUsersDto {
   limit?: number;
 }
 
-/** Khoá tài khoản — bắt buộc ghi lý do, gửi thẳng cho người dùng qua email vì họ không đăng nhập được để xem trong app. */
+export const LOCK_SCOPES = ['buyer', 'seller', 'all'] as const;
+export type LockScope = (typeof LOCK_SCOPES)[number];
+
+/**
+ * Khoá tài khoản — bắt buộc ghi lý do, gửi thẳng cho người dùng qua email vì
+ * họ không đăng nhập được để xem trong app. `scope` quyết định khoá riêng vai
+ * trò mua (`buyer`), vai trò bán (`seller`, chặn đăng nhập app seller — khác
+ * "đình chỉ gian hàng" vốn vẫn cho đăng nhập), hay toàn bộ tài khoản (`all`).
+ */
 export class LockUserDto {
   @IsString()
   @MinLength(5, {
@@ -42,4 +50,12 @@ export class LockUserDto {
   })
   @MaxLength(500)
   reason: string;
+
+  @IsIn(LOCK_SCOPES)
+  scope: LockScope;
+}
+
+export class UnlockUserDto {
+  @IsIn(LOCK_SCOPES)
+  scope: LockScope;
 }

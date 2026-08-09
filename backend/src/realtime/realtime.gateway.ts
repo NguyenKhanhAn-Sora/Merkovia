@@ -63,7 +63,7 @@ export class RealtimeGateway
         accessCookieName(scope),
       );
       // Ném nếu token thiếu/hết hạn/bị thu hồi — cùng đường kiểm với REST.
-      const user = await this.accounts.userFromAccessToken(token);
+      const user = await this.accounts.userFromAccessToken(token, scope);
 
       const userId = String(user._id);
       client.data.userId = userId;

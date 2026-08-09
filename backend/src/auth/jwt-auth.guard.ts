@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AccountService } from './account.service';
-import { readAccessToken } from '../common/auth-scope';
+import { readAccessToken, scopeFromRequest } from '../common/auth-scope';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /** Request đã qua guard thì luôn có `user`. */
@@ -31,6 +31,7 @@ export class JwtAuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     req.user = await this.accountService.userFromAccessToken(
       readAccessToken(req),
+      scopeFromRequest(req),
     );
     return true; // userFromAccessToken tự ném 401 nếu không hợp lệ
   }

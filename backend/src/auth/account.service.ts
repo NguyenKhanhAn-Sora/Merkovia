@@ -13,6 +13,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { Connection, Model, Types } from 'mongoose';
 import { config } from '../config/config';
+import type { AppScope } from '../common/auth-scope';
 import { normalizePhone } from '../common/phone';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { Gender, Profile, ProfileDocument } from '../profiles/schemas/profile.schema';
@@ -178,7 +179,7 @@ export class AccountService {
    * - Đã có tài khoản → đăng nhập luôn (liên kết provider nếu chưa có).
    * - Chưa có → trả token ngắn hạn (15') để đi tiếp bước nhập hồ sơ.
    */
-  async googleAuth(dto: GoogleAuthDto) {
+  async googleAuth(dto: GoogleAuthDto, scope?: AppScope) {
     const g = await this.google.exchangeCode(dto.code);
     if (!g.emailVerified) {
       throw new UnauthorizedException('Email Google này chưa được xác minh.');
@@ -194,7 +195,7 @@ export class AccountService {
         ];
       }
       user.emailVerified = true;
-      const session = await this.issueSession(user);
+      const session = await this.issueSession(user, true, scope);
       return { needsProfile: false as const, ...session };
     }
 
@@ -532,8 +533,13 @@ export class AccountService {
     }
 
     // Vừa xác thực OTP/Google xong → đăng nhập luôn, không bắt đăng nhập lại
-    // (giống luồng mở shop cho tài khoản sẵn có).
-    const sessionData = await this.issueSession(createdUser as UserDocument);
+    // (giống luồng mở shop cho tài khoản sẵn có). Luôn là tài khoản seller
+    // mới tạo — không cần suy scope từ request.
+    const sessionData = await this.issueSession(
+      createdUser as UserDocument,
+      true,
+      'seller',
+    );
     return { ...sessionData, shopId };
   }
 
@@ -546,7 +552,10 @@ export class AccountService {
    * Xác thực access token trong cookie → user hiện tại.
    * Public để `JwtAuthGuard` dùng chung, tránh có 2 bản kiểm token khác nhau.
    */
-  async userFromAccessToken(accessToken?: string): Promise<UserDocument> {
+  async userFromAccessToken(
+    accessToken?: string,
+    scope?: AppScope,
+  ): Promise<UserDocument> {
     if (!accessToken) {
       throw new UnauthorizedException('Bạn cần đăng nhập để thực hiện thao tác này.');
     }
@@ -568,21 +577,45 @@ export class AccountService {
         'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
       );
     }
-    // Admin khoá tài khoản (`AdminUsersService.lock`) — chặn NGAY cả phiên đã
-    // đăng nhập từ trước, không đợi token hết hạn tự nhiên. Đây là chỗ DUY
-    // NHẤT mọi request đã đăng nhập đi qua nên chặn ở đây chặn được toàn bộ
-    // route, không cần rải điều kiện ra từng controller.
+    this.assertNotLocked(user, scope);
+    return user;
+  }
+
+  /**
+   * Admin khoá tài khoản (`AdminUsersService.lock`) — chặn NGAY cả phiên đã
+   * đăng nhập từ trước, không đợi token hết hạn tự nhiên. Dùng chung bởi
+   * `userFromAccessToken` (mọi request đã đăng nhập) và `issueSession` (đăng
+   * nhập/gia hạn mới) — chỉ HAI nơi này, không rải điều kiện ra từng controller.
+   *
+   * `status: suspended/deleted` chặn TOÀN BỘ, mọi app — dành cho vấn đề DANH
+   * TÍNH (gian lận đăng nhập, lộ mật khẩu, yêu cầu pháp lý). `buyerLocked`/
+   * `sellerLocked` chỉ chặn ĐÚNG app tương ứng — dành cho vi phạm gắn với một
+   * VAI TRÒ cụ thể (buyer lạm dụng hoàn trả không nên mất luôn quyền bán, và
+   * ngược lại). Không có `scope` (vd job nội bộ) thì chỉ kiểm `status`.
+   */
+  private assertNotLocked(user: UserDocument, scope?: AppScope): void {
     if (user.status === 'suspended' || user.status === 'deleted') {
       throw new UnauthorizedException(
         'Tài khoản của bạn đã bị khoá. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
       );
     }
-    return user;
+    if (scope === 'buyer' && user.buyerLocked) {
+      throw new UnauthorizedException(
+        'Tài khoản của bạn đã bị cấm mua hàng. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
+      );
+    }
+    if (scope === 'seller' && user.sellerLocked) {
+      throw new UnauthorizedException(
+        'Tài khoản của bạn đã bị cấm bán hàng. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
+      );
+    }
   }
 
   /** Gian hàng của user hiện tại (null nếu chưa mở shop). */
   async getMyShop(accessToken?: string) {
-    const user = await this.userFromAccessToken(accessToken);
+    // Luôn thao tác trên shop CHÍNH MÌNH — kiểm khoá theo vai trò seller dù
+    // token đến từ cookie nào (đây là hành động thuộc domain người bán).
+    const user = await this.userFromAccessToken(accessToken, 'seller');
     const shop = await this.shopModel.findOne({ owner: user._id });
     if (!shop) return { shop: null };
     return {
@@ -635,7 +668,7 @@ export class AccountService {
    * hướng dẫn của chính mình — không đụng tới tiền, đơn hay quyền gì cả.
    */
   async markSetupDone(accessToken?: string) {
-    const user = await this.userFromAccessToken(accessToken);
+    const user = await this.userFromAccessToken(accessToken, 'seller');
     const shop = await this.shopModel.findOneAndUpdate(
       { owner: user._id, setupDoneAt: { $exists: false } },
       { $set: { setupDoneAt: new Date() } },
@@ -658,7 +691,7 @@ export class AccountService {
 
   /** Cập nhật thông tin gian hàng. Chỉ áp dụng các trường được gửi lên. */
   async updateShop(accessToken: string | undefined, dto: UpdateShopDto) {
-    const user = await this.userFromAccessToken(accessToken);
+    const user = await this.userFromAccessToken(accessToken, 'seller');
     const shop = await this.shopModel.findOne({ owner: user._id });
     if (!shop) throw new NotFoundException('Tài khoản này chưa có gian hàng.');
 
@@ -766,7 +799,7 @@ export class AccountService {
     accessToken: string | undefined,
     dto: UpdateShopLogoDto,
   ) {
-    const user = await this.userFromAccessToken(accessToken);
+    const user = await this.userFromAccessToken(accessToken, 'seller');
     const shop = await this.shopModel.findOne({ owner: user._id });
     if (!shop) {
       throw new NotFoundException('Tài khoản này chưa có gian hàng.');
@@ -784,8 +817,12 @@ export class AccountService {
     return { ok: true, logoUrl: shop.logoUrl };
   }
 
-  async openShop(accessToken: string | undefined, dto: OpenShopDto) {
-    const user = await this.userFromAccessToken(accessToken);
+  async openShop(
+    accessToken: string | undefined,
+    dto: OpenShopDto,
+    scope?: AppScope,
+  ) {
+    const user = await this.userFromAccessToken(accessToken, scope);
 
     if (await this.shopModel.exists({ owner: user._id })) {
       throw new ConflictException('Tài khoản này đã có gian hàng.');
@@ -866,7 +903,7 @@ export class AccountService {
     if (!isOwnVerifiedPhone) this.auth.consumeVerified('phone', dto.contactPhone);
 
     // Cấp lại phiên: token mới mang role seller để client vào được Kênh Người Bán.
-    const sessionData = await this.issueSession(user);
+    const sessionData = await this.issueSession(user, true, scope);
     return { ...sessionData, shopId };
   }
 
@@ -890,7 +927,7 @@ export class AccountService {
   }
 
   /** Đăng nhập bằng email + mật khẩu. */
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, scope?: AppScope) {
     const email = dto.email.trim().toLowerCase();
     const user = await this.userModel.findOne({ email });
     if (!user) {
@@ -909,11 +946,11 @@ export class AccountService {
     if (!ok) {
       throw new UnauthorizedException('Email hoặc mật khẩu không đúng.');
     }
-    return this.issueSession(user);
+    return this.issueSession(user, true, scope);
   }
 
   /** Đăng nhập bằng SĐT + OTP (tài khoản SĐT không dùng mật khẩu). */
-  async loginWithPhone(dto: LoginPhoneDto) {
+  async loginWithPhone(dto: LoginPhoneDto, scope?: AppScope) {
     const status = this.auth.verifyOtp('phone', dto.phone, dto.code);
     if (status !== 'success') {
       throw new UnauthorizedException(OTP_VERIFY_MESSAGES[status]);
@@ -926,14 +963,14 @@ export class AccountService {
     if (!user) {
       throw new UnauthorizedException('Số điện thoại này chưa được đăng ký.');
     }
-    return this.issueSession(user);
+    return this.issueSession(user, true, scope);
   }
 
   /**
    * Cấp lại phiên từ refresh token trong cookie (khi access token hết hạn).
    * Xoay vòng cả cặp token; từ chối nếu refresh token đã hết hạn/bị thu hồi.
    */
-  async refreshSession(refreshToken: string | undefined) {
+  async refreshSession(refreshToken: string | undefined, scope?: AppScope) {
     if (!refreshToken) {
       throw new UnauthorizedException('Phiên đăng nhập đã kết thúc.');
     }
@@ -964,19 +1001,18 @@ export class AccountService {
     }
 
     // Gia hạn không phải là đăng nhập mới → không đụng lastLoginAt.
-    return this.issueSession(user, false);
+    return this.issueSession(user, false, scope);
   }
 
   /** Cập nhật lastLogin + phát access/refresh token và thông tin user. */
-  private async issueSession(user: UserDocument, touchLogin = true) {
-    // Chặn NGAY tại đăng nhập/gia hạn — báo rõ "tài khoản bị khoá" thay vì để
-    // đăng nhập "thành công" rồi request kế tiếp mới bị `userFromAccessToken`
-    // chặn, gây khó hiểu cho người dùng.
-    if (user.status === 'suspended' || user.status === 'deleted') {
-      throw new UnauthorizedException(
-        'Tài khoản của bạn đã bị khoá. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
-      );
-    }
+  private async issueSession(
+    user: UserDocument,
+    touchLogin = true,
+    scope?: AppScope,
+  ) {
+    // Chặn NGAY tại đăng nhập/gia hạn — báo rõ lý do thay vì để đăng nhập
+    // "thành công" rồi request kế tiếp mới bị `userFromAccessToken` chặn.
+    this.assertNotLocked(user, scope);
     if (touchLogin) {
       user.lastLoginAt = new Date();
       await user.save();

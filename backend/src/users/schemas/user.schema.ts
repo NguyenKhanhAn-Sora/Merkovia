@@ -37,6 +37,20 @@ export class User {
   @Prop({ type: String, enum: USER_STATUS, default: 'active' })
   status: UserStatus;
 
+  /**
+   * Khoá riêng theo VAI TRÒ — tách khỏi `status` (dành cho vấn đề DANH TÍNH:
+   * gian lận đăng nhập, lộ mật khẩu, yêu cầu pháp lý — khoá cả hai app).
+   * `buyerLocked` chặn đăng nhập app người MUA, `sellerLocked` chặn đăng nhập
+   * app người BÁN — một tài khoản vừa mua vừa bán bị cấm vì hành vi MUA hàng
+   * (vd lạm dụng hoàn trả) không nên kéo theo mất luôn quyền vận hành shop
+   * đang hoạt động bình thường của họ, và ngược lại.
+   */
+  @Prop({ default: false })
+  buyerLocked: boolean;
+
+  @Prop({ default: false })
+  sellerLocked: boolean;
+
   /** Đăng nhập mạng xã hội (Google…), để mở rộng sau. */
   @Prop({
     type: [{ provider: String, providerId: String, _id: false }],
