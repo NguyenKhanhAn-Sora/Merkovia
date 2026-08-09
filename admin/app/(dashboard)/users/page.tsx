@@ -1,51 +1,71 @@
 "use client";
 
-import { useState } from "react";
-import { Eye, MagnifyingGlass } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
+import { LockKey, LockKeyOpen, MagnifyingGlass } from "@phosphor-icons/react";
 import {
   Badge,
   DataTable,
   GhostButton,
   Panel,
   PageHeader,
-  PreviewNote,
   TabBar,
   Td,
+  type BadgeTone,
 } from "../../../components/dashboard/ui";
+import UserLockModal from "../../../components/dashboard/UserLockModal";
+import {
+  getUsers,
+  type AdminUserListItem,
+  type AdminUserListResult,
+  type UserRole,
+  type UserTab,
+} from "../../../lib/users-api";
 
-interface Row {
-  name: string;
-  contact: string;
-  roles: ("buyer" | "seller")[];
-  status: "active" | "suspended";
-  joined: string;
-}
+const ROLE_LABEL: Record<UserRole, string> = {
+  buyer: "Người mua",
+  seller: "Người bán",
+  admin: "Quản trị",
+};
 
-const USERS: Row[] = [
-  { name: "Trần Minh An", contact: "an.tran@gmail.com", roles: ["buyer"], status: "active", joined: "12/03/2026" },
-  { name: "Dao Thái Hoà (Shop)", contact: "hoa.dao@gmail.com", roles: ["seller"], status: "active", joined: "02/01/2026" },
-  { name: "Nguyễn Thu Hà", contact: "ha.nguyen@gmail.com", roles: ["buyer", "seller"], status: "active", joined: "28/11/2025" },
-  { name: "Lê Quốc Bảo", contact: "0912 345 678", roles: ["buyer"], status: "suspended", joined: "19/09/2025" },
-  { name: "Phạm Gia Hân", contact: "han.pham@gmail.com", roles: ["buyer"], status: "active", joined: "05/08/2025" },
-  { name: "Đỗ Anh Tuấn", contact: "0987 654 321", roles: ["buyer"], status: "active", joined: "14/06/2025" },
-];
-
-const TABS = [
-  { key: "all", label: "Tất cả", count: USERS.length },
-  { key: "buyer", label: "Người mua", count: USERS.filter((u) => u.roles.includes("buyer")).length },
-  { key: "seller", label: "Người bán", count: USERS.filter((u) => u.roles.includes("seller")).length },
-  { key: "suspended", label: "Bị khoá", count: USERS.filter((u) => u.status === "suspended").length },
-];
-
-const ROLE_LABEL: Record<"buyer" | "seller", string> = { buyer: "Người mua", seller: "Người bán" };
+const STATUS_BADGE: Record<string, { label: string; tone: BadgeTone }> = {
+  active: { label: "Đang hoạt động", tone: "success" },
+  pending: { label: "Chờ xác thực", tone: "warning" },
+  suspended: { label: "Đã khoá", tone: "danger" },
+  deleted: { label: "Đã xoá", tone: "neutral" },
+};
 
 export default function UsersPage() {
-  const [tab, setTab] = useState("all");
-  const rows = USERS.filter((u) => {
-    if (tab === "all") return true;
-    if (tab === "suspended") return u.status === "suspended";
-    return u.roles.includes(tab as "buyer" | "seller");
-  });
+  const [tab, setTab] = useState<UserTab>("all");
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+
+  const [data, setData] = useState<AdminUserListResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [modalUser, setModalUser] = useState<{ user: AdminUserListItem; mode: "lock" | "unlock" } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setData(await getUsers({ tab, q, page, limit: 20 }));
+    } finally {
+      setLoading(false);
+    }
+  }, [tab, q, page]);
+
+  useEffect(() => {
+    const t = setTimeout(() => void load(), q ? 400 : 0);
+    return () => clearTimeout(t);
+  }, [load, q]);
+
+  const c = data?.counts;
+  const tabs: { key: UserTab; label: string; count?: number }[] = [
+    { key: "all", label: "Tất cả", count: c?.all },
+    { key: "buyer", label: "Người mua", count: c?.buyer },
+    { key: "seller", label: "Người bán", count: c?.seller },
+    { key: "locked", label: "Bị khoá", count: c?.locked },
+  ];
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
 
   return (
     <div>
@@ -60,48 +80,122 @@ export default function UsersPage() {
             />
             <input
               type="search"
-              disabled
-              placeholder="Tìm theo tên, email, SĐT…"
-              className="h-11 w-full cursor-not-allowed rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star/40 outline-none"
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Tìm theo email, SĐT…"
+              className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star outline-none transition-colors placeholder:text-star/35 focus:border-cosmic-violet/50"
             />
           </div>
         }
       />
-      <PreviewNote />
 
       <Panel padded={false} className="overflow-hidden">
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
-          <TabBar tabs={TABS} value={tab} onChange={setTab} />
+          <TabBar
+            tabs={tabs}
+            value={tab}
+            onChange={(k) => {
+              setTab(k as UserTab);
+              setPage(1);
+            }}
+          />
         </div>
-        <DataTable columns={["Người dùng", "Liên hệ", "Vai trò", "Trạng thái", "Ngày tham gia", ""]}>
-          {rows.map((u) => (
-            <tr key={u.name}>
-              <Td className="font-medium text-star/85">{u.name}</Td>
-              <Td className="text-star/60">{u.contact}</Td>
-              <Td>
-                <span className="flex flex-wrap gap-1.5">
-                  {u.roles.map((r) => (
-                    <Badge key={r} tone="info">
-                      {ROLE_LABEL[r]}
-                    </Badge>
-                  ))}
-                </span>
-              </Td>
-              <Td>
-                <Badge tone={u.status === "active" ? "success" : "danger"}>
-                  {u.status === "active" ? "Đang hoạt động" : "Đã khoá"}
-                </Badge>
-              </Td>
-              <Td className="text-star/50">{u.joined}</Td>
-              <Td>
-                <GhostButton icon={Eye} disabled className="h-9 px-3 text-[13px]">
-                  Chi tiết
-                </GhostButton>
-              </Td>
-            </tr>
-          ))}
-        </DataTable>
+
+        {!loading && data && data.items.length === 0 ? (
+          <p className="py-16 text-center text-[13.5px] text-star/40">Không có tài khoản nào ở mục này.</p>
+        ) : (
+          <DataTable columns={["Người dùng", "Liên hệ", "Vai trò", "Trạng thái", "Ngày tham gia", ""]}>
+            {(data?.items ?? []).map((u) => {
+              const badge = STATUS_BADGE[u.status] ?? STATUS_BADGE.active;
+              return (
+                <tr key={u.id}>
+                  <Td className="font-medium text-star/85">
+                    {u.name || "—"}
+                    {u.shop && <span className="ml-1.5 text-star/40">({u.shop.name})</span>}
+                  </Td>
+                  <Td className="text-star/60">{u.email || u.phone || "—"}</Td>
+                  <Td>
+                    <span className="flex flex-wrap gap-1.5">
+                      {u.roles
+                        .filter((r) => r !== "admin")
+                        .map((r) => (
+                          <Badge key={r} tone="info">
+                            {ROLE_LABEL[r]}
+                          </Badge>
+                        ))}
+                    </span>
+                  </Td>
+                  <Td>
+                    <Badge tone={badge.tone}>{badge.label}</Badge>
+                  </Td>
+                  <Td className="text-star/50">
+                    {u.createdAt
+                      ? new Date(u.createdAt).toLocaleDateString("vi-VN", { dateStyle: "short" })
+                      : "—"}
+                  </Td>
+                  <Td>
+                    {u.status === "suspended" ? (
+                      <GhostButton
+                        icon={LockKeyOpen}
+                        onClick={() => setModalUser({ user: u, mode: "unlock" })}
+                        className="h-9 px-3 text-[13px]"
+                      >
+                        Gỡ khoá
+                      </GhostButton>
+                    ) : (
+                      <GhostButton
+                        icon={LockKey}
+                        onClick={() => setModalUser({ user: u, mode: "lock" })}
+                        className="h-9 px-3 text-[13px] text-rose-300 hover:text-rose-200"
+                      >
+                        Khoá
+                      </GhostButton>
+                    )}
+                  </Td>
+                </tr>
+              );
+            })}
+          </DataTable>
+        )}
+
+        {data && totalPages > 1 && (
+          <div className="flex items-center justify-between gap-4 px-6 py-4">
+            <span className="text-[13px] text-star/45">
+              Trang {data.page}/{totalPages} — {data.total} tài khoản
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={data.page <= 1}
+                className="h-9 rounded-lg border border-white/10 px-3 text-[13px] text-star/70 transition-colors hover:border-white/25 disabled:opacity-35"
+              >
+                Trước
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={data.page >= totalPages}
+                className="h-9 rounded-lg border border-white/10 px-3 text-[13px] text-star/70 transition-colors hover:border-white/25 disabled:opacity-35"
+              >
+                Sau
+              </button>
+            </div>
+          </div>
+        )}
       </Panel>
+
+      {modalUser && (
+        <UserLockModal
+          user={modalUser.user}
+          mode={modalUser.mode}
+          onClose={() => setModalUser(null)}
+          onDone={() => void load()}
+        />
+      )}
     </div>
   );
 }

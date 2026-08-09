@@ -4,7 +4,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AccountService } from './account.service';
 import { GoogleService } from './google.service';
-import { MailService } from './mail.service';
+import { MailModule } from './mail.module';
 import { OtpStore } from './otp.store';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { UsersModule } from '../users/users.module';
@@ -21,6 +21,7 @@ import { config } from '../config/config';
     AddressesModule,
     ShopsModule,
     SmsModule,
+    MailModule,
     JwtModule.register({ secret: config.jwt.secret }),
   ],
   controllers: [AuthController],
@@ -28,7 +29,6 @@ import { config } from '../config/config';
     AuthService,
     AccountService,
     GoogleService,
-    MailService,
     OtpStore,
     JwtAuthGuard,
   ],
@@ -36,8 +36,8 @@ import { config } from '../config/config';
   // `AuthService` mở ra cho `AccountModule` dùng chung một kho OTP: đổi số
   // điện thoại trong trang Tài khoản phải đi qua đúng bộ đếm số lần nhập sai
   // và cooldown gửi lại như lúc đăng ký, không dựng một luồng OTP thứ hai.
-  // `MailService` mở ra cho các module cần gửi email nghiệp vụ khác (báo cáo
-  // vi phạm gian hàng…) mà không phải tự dựng lại transporter.
-  exports: [AccountService, AuthService, JwtAuthGuard, MailService],
+  // `MailModule` re-export để các module đã quen import `AuthModule` để lấy
+  // `MailService` (báo cáo vi phạm gian hàng…) không phải sửa lại.
+  exports: [AccountService, AuthService, JwtAuthGuard, MailModule],
 })
 export class AuthModule {}

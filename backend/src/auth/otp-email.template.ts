@@ -272,6 +272,71 @@ export function renderShopViolationText(params: {
   ].join('\n');
 }
 
+/** Báo tài khoản bị admin khoá/gỡ khoá — khác `renderShopViolationEmail` (đó là về GIAN HÀNG, đây là về TÀI KHOẢN đăng nhập). */
+export function renderAccountStatusEmail(params: {
+  action: 'lock' | 'unlock';
+  reason?: string;
+}): string {
+  const { action, reason } = params;
+  const isLock = action === 'lock';
+  return shell(
+    isLock
+      ? 'Tài khoản Merkovia của bạn đã bị khoá.'
+      : 'Tài khoản Merkovia của bạn đã được gỡ khoá.',
+    `<tr>
+      <td style="padding:20px 32px 0;">
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;">Xin chào,</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:0 32px 0;">
+        <div style="border-radius:10px;padding:14px 18px;background:${isLock ? '#fef2f2' : '#f0fdf4'};border:1px solid ${isLock ? '#fecaca' : '#bbf7d0'};">
+          <p style="margin:0;font-size:14px;font-weight:700;color:${isLock ? '#b91c1c' : '#15803d'};">
+            ${isLock ? 'Tài khoản đã bị khoá' : 'Tài khoản đã được gỡ khoá'}
+          </p>
+          ${reason ? `<p style="margin:8px 0 0;font-size:14px;line-height:1.6;color:#4b5563;">${reason}</p>` : ''}
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:16px 32px 0;">
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#4b5563;">
+          ${
+            isLock
+              ? 'Bạn sẽ không thể đăng nhập vào Merkovia cho đến khi tài khoản được gỡ khoá. Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
+              : 'Bạn có thể đăng nhập lại bình thường ngay bây giờ.'
+          }
+        </p>
+      </td>
+    </tr>`,
+  );
+}
+
+export function renderAccountStatusText(params: {
+  action: 'lock' | 'unlock';
+  reason?: string;
+}): string {
+  const { action, reason } = params;
+  const isLock = action === 'lock';
+  return [
+    'Xin chào,',
+    '',
+    isLock
+      ? 'Tài khoản Merkovia của bạn đã bị KHOÁ.'
+      : 'Tài khoản Merkovia của bạn đã được GỠ KHOÁ.',
+    reason ? `Lý do: ${reason}` : '',
+    '',
+    isLock
+      ? 'Bạn sẽ không thể đăng nhập cho đến khi tài khoản được gỡ khoá. Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ đội ngũ hỗ trợ Merkovia.'
+      : 'Bạn có thể đăng nhập lại bình thường ngay bây giờ.',
+    '',
+    'Trân trọng,',
+    'Đội ngũ Merkovia',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /** Phiên bản text thuần cho email client không hiển thị HTML. */
 export function renderOtpText(code: string, ttlMinutes: number): string {
   return [

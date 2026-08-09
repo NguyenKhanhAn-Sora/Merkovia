@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { config } from '../config/config';
 import {
+  renderAccountStatusEmail,
+  renderAccountStatusText,
   renderNoPasswordEmail,
   renderNoPasswordText,
   renderOtpEmail,
@@ -117,6 +119,37 @@ export class MailService {
     } catch (err) {
       this.logger.error(
         `Gửi email xử lý báo cáo tới ${to} thất bại`,
+        err as Error,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Báo tài khoản bị admin khoá/gỡ khoá. Khác `sendShopViolationNotice` (đó
+   * là báo GIAN HÀNG) — cái này báo trực tiếp người dùng vì họ không đăng
+   * nhập được để thấy thông báo trong app.
+   */
+  async sendAccountStatusNotice(
+    to: string,
+    params: { action: 'lock' | 'unlock'; reason?: string },
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: config.smtp.from,
+        to,
+        replyTo: config.smtp.user,
+        subject:
+          params.action === 'lock'
+            ? 'Tài khoản Merkovia của bạn đã bị khoá'
+            : 'Tài khoản Merkovia của bạn đã được gỡ khoá',
+        text: renderAccountStatusText(params),
+        html: renderAccountStatusEmail(params),
+      });
+      this.logger.log(`Đã gửi email ${params.action} tài khoản tới ${to}`);
+    } catch (err) {
+      this.logger.error(
+        `Gửi email ${params.action} tài khoản tới ${to} thất bại`,
         err as Error,
       );
       throw err;

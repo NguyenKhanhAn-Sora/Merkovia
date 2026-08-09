@@ -568,6 +568,15 @@ export class AccountService {
         'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
       );
     }
+    // Admin khoá tài khoản (`AdminUsersService.lock`) — chặn NGAY cả phiên đã
+    // đăng nhập từ trước, không đợi token hết hạn tự nhiên. Đây là chỗ DUY
+    // NHẤT mọi request đã đăng nhập đi qua nên chặn ở đây chặn được toàn bộ
+    // route, không cần rải điều kiện ra từng controller.
+    if (user.status === 'suspended' || user.status === 'deleted') {
+      throw new UnauthorizedException(
+        'Tài khoản của bạn đã bị khoá. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
+      );
+    }
     return user;
   }
 
@@ -960,6 +969,14 @@ export class AccountService {
 
   /** Cập nhật lastLogin + phát access/refresh token và thông tin user. */
   private async issueSession(user: UserDocument, touchLogin = true) {
+    // Chặn NGAY tại đăng nhập/gia hạn — báo rõ "tài khoản bị khoá" thay vì để
+    // đăng nhập "thành công" rồi request kế tiếp mới bị `userFromAccessToken`
+    // chặn, gây khó hiểu cho người dùng.
+    if (user.status === 'suspended' || user.status === 'deleted') {
+      throw new UnauthorizedException(
+        'Tài khoản của bạn đã bị khoá. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
+      );
+    }
     if (touchLogin) {
       user.lastLoginAt = new Date();
       await user.save();

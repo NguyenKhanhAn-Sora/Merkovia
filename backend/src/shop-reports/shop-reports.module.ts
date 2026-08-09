@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ShopReport, ShopReportSchema } from './schemas/shop-report.schema';
 import { ShopReportsService } from './shop-reports.service';
-import { ShopSuspensionService } from './shop-suspension.service';
+import { ShopSuspensionModule } from './shop-suspension.module';
 import {
   AdminShopReportsController,
   ShopReportsController,
@@ -32,8 +32,9 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     AdminAuthModule, // AdminAuthGuard (trang quản trị)
     NotificationsModule, // báo vi phạm real-time cho gian hàng
     AuditLogModule, // ghi nhật ký khi admin xử lý report/gỡ đình chỉ
+    ShopSuspensionModule, // lịch tự động gỡ đình chỉ (tách riêng, xem shop-suspension.module.ts)
   ],
   controllers: [ShopReportsController, AdminShopReportsController],
-  providers: [ShopReportsService, ShopSuspensionService],
+  providers: [ShopReportsService],
 })
 export class ShopReportsModule {}

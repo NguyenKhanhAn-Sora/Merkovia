@@ -29,6 +29,8 @@ import { CartModule } from './cart/cart.module';
 import { ShopReportsModule } from './shop-reports/shop-reports.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
+import { AdminUsersModule } from './users/admin-users.module';
+import { AdminShopsModule } from './shops/admin-shops.module';
 import { config } from './config/config';
 
 @Module({
@@ -62,6 +64,8 @@ import { config } from './config/config';
     ShopReportsModule,
     AuditLogModule,
     AdminDashboardModule,
+    AdminUsersModule,
+    AdminShopsModule,
   ],
   controllers: [AppController],
   // Đếm theo phiên đăng nhập, không theo IP — nhiều người dùng chung một IP
