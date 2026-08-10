@@ -243,6 +243,16 @@ export class AdminOrdersController {
     return this.orders.adminListDisputes();
   }
 
+  @Get()
+  list(@Query() query: QueryOrdersDto) {
+    return this.orders.adminList(query);
+  }
+
+  @Get(':id')
+  getOne(@Param('id') id: string) {
+    return this.orders.adminGetOne(id);
+  }
+
   @Post(':id/cancel-request')
   @HttpCode(HttpStatus.OK)
   respondCancel(

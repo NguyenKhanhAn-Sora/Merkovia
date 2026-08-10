@@ -48,7 +48,12 @@ function safeEqual(a: string, b: string): boolean {
 @Injectable()
 export class AdminAuthService {
   private readonly jwt = new JwtService({ secret: config.jwt.secret });
-  private revokedBefore = 0;
+  // Khởi tạo bằng thời điểm boot service (không phải 0) để khớp với hành vi
+  // đã ghi trong comment ở trên: restart server cũng thu hồi mọi token phát
+  // trước đó, không chỉ logout mới thu hồi. Làm tròn xuống đầu giây (như
+  // `iat` của JWT, vốn tính bằng giây) để token phát ra ngay trong giây boot
+  // không bị coi là "phát trước revokedBefore" rồi bị từ chối oan.
+  private revokedBefore = Math.floor(Date.now() / 1000) * 1000;
 
   private issueTokens(): {
     accessToken: string;

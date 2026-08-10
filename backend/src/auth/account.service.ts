@@ -595,19 +595,28 @@ export class AccountService {
    */
   private assertNotLocked(user: UserDocument, scope?: AppScope): void {
     if (user.status === 'suspended' || user.status === 'deleted') {
-      throw new UnauthorizedException(
-        'Tài khoản của bạn đã bị khoá. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
-      );
+      throw new UnauthorizedException({
+        message:
+          'Tài khoản của bạn đã bị khoá. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
+        code: 'ACCOUNT_LOCKED',
+        lockScope: 'all',
+      });
     }
     if (scope === 'buyer' && user.buyerLocked) {
-      throw new UnauthorizedException(
-        'Tài khoản của bạn đã bị cấm mua hàng. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
-      );
+      throw new UnauthorizedException({
+        message:
+          'Tài khoản của bạn đã bị cấm mua hàng. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
+        code: 'ACCOUNT_LOCKED',
+        lockScope: 'buyer',
+      });
     }
     if (scope === 'seller' && user.sellerLocked) {
-      throw new UnauthorizedException(
-        'Tài khoản của bạn đã bị cấm bán hàng. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
-      );
+      throw new UnauthorizedException({
+        message:
+          'Tài khoản của bạn đã bị cấm bán hàng. Vui lòng liên hệ đội ngũ hỗ trợ Merkovia nếu cần hỗ trợ.',
+        code: 'ACCOUNT_LOCKED',
+        lockScope: 'seller',
+      });
     }
   }
 

@@ -1607,6 +1607,78 @@ export class OrdersService {
   }
 
   /**
+   * Danh sách đơn hàng TOÀN SÀN cho admin tra cứu — không lọc theo buyer/shop
+   * nào, khác `listMine`/`listForShop` vốn luôn giới hạn theo chủ sở hữu.
+   */
+  async adminList(query: QueryOrdersDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const term = query.q?.trim();
+    const search = term
+      ? {
+          $or: [
+            { orderCode: { $regex: escapeRegex(term), $options: 'i' } },
+            { shopName: { $regex: escapeRegex(term), $options: 'i' } },
+            {
+              'shippingAddress.recipientName': {
+                $regex: escapeRegex(term),
+                $options: 'i',
+              },
+            },
+            {
+              'shippingAddress.recipientPhone': {
+                $regex: escapeRegex(term),
+                $options: 'i',
+              },
+            },
+          ],
+        }
+      : {};
+
+    const filter = {
+      ...(query.status ? { status: query.status as OrderStatus } : {}),
+      ...search,
+    };
+
+    const [orders, total, counts] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate<{
+          buyer: { _id: Types.ObjectId; email?: string; phone?: string };
+        }>('buyer', 'email phone')
+        .lean(),
+      this.orderModel.countDocuments(filter),
+      this.countByStatus({}),
+    ]);
+
+    return {
+      items: orders.map((o) => this.toAdminOrder(o)),
+      total,
+      page,
+      limit,
+      counts,
+    };
+  }
+
+  async adminGetOne(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Không tìm thấy đơn hàng.');
+    }
+    const order = await this.orderModel
+      .findById(id)
+      .populate<{
+        buyer: { _id: Types.ObjectId; email?: string; phone?: string };
+      }>('buyer', 'email phone')
+      .lean();
+    if (!order) throw new NotFoundException('Không tìm thấy đơn hàng.');
+    return { order: this.toAdminOrder(order, true) };
+  }
+
+  /**
    * Bắt đầu / tiếp tục thanh toán — trả về link của cổng.
    *
    * Việc chốt "đã trả tiền" KHÔNG nằm ở đây mà ở webhook của cổng: client tự
@@ -1920,6 +1992,56 @@ export class OrdersService {
       canRespondReturn: o.returnRequest?.status === 'requested',
       buyerRefundPending: o.buyerRefundPending,
       ...(full ? { timeline: o.timeline } : {}),
+    };
+  }
+
+  /**
+   * Trình bày đơn cho admin — đọc trên tài liệu `.lean()` đã populate `buyer`
+   * (khác `baseOrder` vốn chạy trên `OrderDocument` sống), nên viết riêng thay
+   * vì tái dùng `baseOrder`/`toBuyerOrder`/`toSellerOrder`.
+   */
+  private toAdminOrder(
+    o: Omit<Order, 'buyer'> & {
+      _id: Types.ObjectId;
+      createdAt?: Date;
+      buyer: { _id: Types.ObjectId; email?: string; phone?: string };
+    },
+    full = false,
+  ) {
+    const buyerId = o.buyer._id;
+    const buyerContact = o.buyer.email || o.buyer.phone || '(ẩn danh)';
+
+    return {
+      id: String(o._id),
+      orderCode: o.orderCode,
+      status: o.status,
+      statusLabel: STATUS_LABEL[o.status],
+      shop: { id: String(o.shop), name: o.shopName, slug: o.shopSlug },
+      buyer: { id: String(buyerId), contact: buyerContact },
+      items: o.items.map((i) => ({
+        productId: String(i.product),
+        name: i.name,
+        image: i.image,
+        variantLabel: i.variantLabel,
+        price: i.price,
+        quantity: i.quantity,
+        subtotal: i.subtotal,
+      })),
+      itemsTotal: o.itemsTotal,
+      shippingFee: o.shippingFee,
+      discount: o.discount,
+      total: o.total,
+      paymentMethod: o.paymentMethod,
+      paidAt: o.paidAt,
+      cancelledBy: o.cancelledBy,
+      cancelReasonType: o.cancelReasonType,
+      cancelReason: o.cancelReason,
+      cancelRequest: o.cancelRequest,
+      returnRequest: o.returnRequest,
+      createdAt: o.createdAt,
+      ...(full
+        ? { shippingAddress: o.shippingAddress, timeline: o.timeline }
+        : {}),
     };
   }
 
