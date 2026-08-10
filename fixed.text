@@ -7,3 +7,6 @@ ta phải giải quyết thế nào, kiểu như trung gian là người lấy h
 và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, có cần làm 1 app riêng không?
 - có nên làm chức năng report 1 buyer nào đó không, ý kiến của bạn thế nao?
 - mỗi account nên dùng unique số điện thoại không hay 1 số điện thoại có thể dùng cho nhiều tài khoản thì phù hợp
+- theo bạn có nên xây dựng cho buyer 1 ví tích trữ số tiền như 1 tài khoản ngân hàng 
+để nhận tiền hoàn trả lại hay là mỗi khi hoàn tiền về cho buyer thì hoàn về thẳng 
+stk ngân hàng của buyer đó luôn?

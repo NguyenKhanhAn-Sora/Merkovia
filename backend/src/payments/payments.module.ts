@@ -9,7 +9,7 @@ import {
   PaymentWebhookController,
 } from './payment.controller';
 import { PayoutService } from './payout.service';
-import { PayoutController } from './payout.controller';
+import { AdminPayoutController, PayoutController } from './payout.controller';
 import {
   BankLookupProvider,
   MockBankLookupProvider,
@@ -24,7 +24,9 @@ import { Payout, PayoutSchema } from './schemas/payout.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { ShopsModule } from '../shops/shops.module';
 import { AuthModule } from '../auth/auth.module';
+import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 /**
  * Thanh toán: tài khoản nhận tiền, thu tiền người mua, chi tiền người bán.
@@ -45,7 +47,9 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ]),
     ShopsModule,
     AuthModule,
+    AdminAuthModule, // AdminAuthGuard cho trang đối soát rút tiền
     NotificationsModule, // báo "đơn mới" cho người bán khi thanh toán online xong
+    AuditLogModule, // ghi nhật ký khi admin chốt thủ công đợt chi bị kẹt
   ],
   controllers: [
     PaymentsController,
@@ -53,6 +57,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     PaymentWebhookController,
     MockGatewayController,
     PayoutController,
+    AdminPayoutController,
   ],
   providers: [
     PaymentsService,

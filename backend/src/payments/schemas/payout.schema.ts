@@ -95,6 +95,18 @@ export class Payout {
 
   @Prop({ trim: true, maxlength: 300 })
   failureReason?: string;
+
+  /**
+   * Ghi chú khi admin CHỦ ĐỘNG chốt trạng thái một đợt chi đang kẹt ở
+   * `processing` (không tự tra cứu được từ nhà cung cấp) — bắt buộc có lý do
+   * vì đây là quyết định thay cho phản hồi thật của nhà cung cấp, cần vết để
+   * đối chiếu lại nếu sai.
+   */
+  @Prop({ trim: true, maxlength: 500 })
+  adminResolutionNote?: string;
+
+  @Prop({ trim: true })
+  resolvedByAdminEmail?: string;
 }
 
 export const PayoutSchema = SchemaFactory.createForClass(Payout);
