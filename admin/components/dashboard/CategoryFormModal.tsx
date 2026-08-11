@@ -10,7 +10,12 @@ interface Props {
   /** Chỉ dùng khi tạo mới danh mục con — id + tên ngành hàng cha để hiển thị. */
   parent?: { id: string; name: string };
   onClose: () => void;
-  onSaved: () => void;
+  /**
+   * Trả về dữ liệu vừa lưu để trang cha cập nhật THẲNG vào state cục bộ —
+   * không cần tải lại cả cây. `id` chỉ có khi vừa TẠO MỚI (trang cha dùng để
+   * phân biệt tạo/sửa mà không cần modal tự khai báo mode).
+   */
+  onSaved: (result: { id?: string; name: string; icon?: string }) => void;
 }
 
 /** Form tạo/sửa Ngành hàng gốc hoặc Danh mục con — cùng 1 modal vì trường giống hệt nhau. */
@@ -30,17 +35,16 @@ export default function CategoryFormModal({ category, parent, onClose, onSaved }
     }
     setBusy(true);
     setError("");
+    const trimmedName = name.trim();
+    const trimmedIcon = icon.trim() || undefined;
     try {
       if (isEdit) {
-        await updateCategory(category!.id, { name: name.trim(), icon: icon.trim() || undefined });
+        await updateCategory(category!.id, { name: trimmedName, icon: trimmedIcon });
+        onSaved({ name: trimmedName, icon: trimmedIcon });
       } else {
-        await createCategory({
-          name: name.trim(),
-          parentId: parent?.id,
-          icon: icon.trim() || undefined,
-        });
+        const res = await createCategory({ name: trimmedName, parentId: parent?.id, icon: trimmedIcon });
+        onSaved({ id: res.id, name: trimmedName, icon: trimmedIcon });
       }
-      onSaved();
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không lưu được.");

@@ -29,7 +29,11 @@ export interface AdminCategoryNode {
   icon?: string;
   order: number;
   isActive: boolean;
-  /** Số sản phẩm còn sống gán TRỰC TIẾP vào node này (chỉ có ý nghĩa với danh mục lá). */
+  /**
+   * Số sản phẩm còn sống thuộc node này. Với Danh mục (lá) là số gán TRỰC
+   * TIẾP; với Ngành hàng gốc là TỔNG của mọi Danh mục con (bản thân ngành
+   * hàng gốc không bao giờ được gán sản phẩm trực tiếp).
+   */
   productCount: number;
   children: AdminCategoryNode[];
   /** Chỉ có ở Ngành hàng gốc: không còn Danh mục con nào đang bật → seller chọn vào đây sẽ bị kẹt. */
@@ -180,6 +184,16 @@ export class CategoriesService implements OnModuleInit {
     }
     for (const root of roots) {
       root.hasNoActiveChildren = !root.children.some((ch) => ch.isActive);
+      // Sản phẩm CHỈ được gán trực tiếp vào danh mục LÁ (seller không chọn
+      // được ngành hàng gốc), nên đếm trực tiếp trên root luôn ra 0 — số đó
+      // trưng ra sẽ trông như "ngành hàng rỗng" dù các con bên trong đầy sản
+      // phẩm. Ghi đè bằng tổng số sản phẩm của TẤT CẢ danh mục con để đúng
+      // với cái admin thực sự muốn biết: "ngành hàng này có bao nhiêu sản
+      // phẩm", không phải "có sản phẩm nào gán thẳng vào chính nó không".
+      root.productCount = root.children.reduce(
+        (sum, ch) => sum + ch.productCount,
+        0,
+      );
     }
     return roots;
   }

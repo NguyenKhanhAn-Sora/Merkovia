@@ -12,8 +12,9 @@ import {
   Plus,
   Trash,
   Warning,
+  type Icon,
 } from "@phosphor-icons/react";
-import { GhostButton, Badge, Panel, PageHeader, PrimaryButton } from "../../../components/dashboard/ui";
+import { Badge, Panel, PageHeader, PrimaryButton } from "../../../components/dashboard/ui";
 import CategoryFormModal from "../../../components/dashboard/CategoryFormModal";
 import ConfirmDialog from "../../../components/dashboard/ConfirmDialog";
 import {
@@ -35,6 +36,43 @@ type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
 const SAVE_DEBOUNCE_MS = 2000;
 
+/**
+ * Nút hành động chỉ có icon (ô vuông) — viết riêng thay vì tái dùng
+ * `GhostButton` với `className="h-8 w-8 px-0"`: `GhostButton` có sẵn `px-4`
+ * trong class gốc, ghép chuỗi với `px-0` truyền vào tạo ra HAI class cùng
+ * thuộc tính padding — Tailwind không đảm bảo class nào "thắng" theo thứ tự
+ * xuất hiện trong chuỗi, nên nếu `px-4` thắng thì một nút rộng 32px bị chiếm
+ * hết bởi padding 16px mỗi bên, ép icon co lại gần như biến mất (đây chính là
+ * lỗi "ô vuông trống" người dùng báo). Component này không kế thừa base class
+ * nào nên không có xung đột. Cũng nhân tiện thêm `title` để hover thấy chú
+ * thích — `GhostButton` không nhận `aria-label` (không có trong prop type) nên
+ * trước đây gắn vào cũng bị bỏ qua âm thầm.
+ */
+function IconActionButton({
+  icon: IconCmp,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: Icon;
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-star/70 transition-colors hover:border-white/20 hover:text-star active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      <IconCmp size={15} weight="regular" />
+    </button>
+  );
+}
+
 /** Kéo `draggedId` tới vị trí của `targetId` trong mảng — chèn TRƯỚC target. */
 function reorderById<T extends { id: string }>(arr: T[], draggedId: string, targetId: string): T[] {
   const from = arr.findIndex((x) => x.id === draggedId);
@@ -44,6 +82,65 @@ function reorderById<T extends { id: string }>(arr: T[], draggedId: string, targ
   const to = copy.findIndex((x) => x.id === targetId);
   copy.splice(to === -1 ? copy.length : to, 0, item);
   return copy;
+}
+
+/**
+ * Các hàm cập nhật CỤC BỘ cho `tree` — thay cho gọi lại `getCategoryTree()`
+ * sau mỗi thao tác. Refetch toàn cây sau MỖI cú bấm ẩn/hiện/sửa/xoá chỉ chấp
+ * nhận được khi cây còn nhỏ; khi hệ thống lớn (nhiều ngành hàng/danh mục),
+ * chờ tải lại cả cây mỗi lần bấm sẽ chậm rõ rệt so với việc chỉ sửa đúng một
+ * node đang đổi trong state có sẵn. Các hàm dưới đây MÔ PHỎNG lại đúng hệ quả
+ * mà backend đã áp dụng (cascade tắt con khi tắt ngành hàng, tính lại
+ * `hasNoActiveChildren`…) để state cục bộ luôn khớp với DB.
+ */
+function withVisibility(tree: AdminCategoryNode[], id: string, isActive: boolean): AdminCategoryNode[] {
+  return tree.map((root) => {
+    if (root.id === id) {
+      // Tắt ngành hàng gốc → cascade tắt luôn mọi danh mục con (khớp
+      // `adminSetVisibility` phía backend). Bật lại thì KHÔNG cascade ngược.
+      const children = isActive ? root.children : root.children.map((c) => ({ ...c, isActive: false }));
+      return { ...root, isActive, children, hasNoActiveChildren: !children.some((c) => c.isActive) };
+    }
+    if (!root.children.some((c) => c.id === id)) return root;
+    const children = root.children.map((c) => (c.id === id ? { ...c, isActive } : c));
+    return { ...root, children, hasNoActiveChildren: !children.some((c) => c.isActive) };
+  });
+}
+
+function withRemoved(tree: AdminCategoryNode[], id: string): AdminCategoryNode[] {
+  return tree
+    .filter((root) => root.id !== id)
+    .map((root) => {
+      const children = root.children.filter((c) => c.id !== id);
+      return { ...root, children, hasNoActiveChildren: !children.some((c) => c.isActive) };
+    });
+}
+
+function withPatch(tree: AdminCategoryNode[], id: string, patch: { name: string; icon?: string }): AdminCategoryNode[] {
+  return tree.map((root) => {
+    if (root.id === id) return { ...root, ...patch };
+    const idx = root.children.findIndex((c) => c.id === id);
+    if (idx === -1) return root;
+    return { ...root, children: root.children.map((c) => (c.id === id ? { ...c, ...patch } : c)) };
+  });
+}
+
+function withNewRoot(tree: AdminCategoryNode[], id: string, name: string, icon?: string): AdminCategoryNode[] {
+  return [
+    ...tree,
+    { id, name, slug: "", icon, order: tree.length, isActive: true, productCount: 0, children: [], hasNoActiveChildren: true },
+  ];
+}
+
+function withNewChild(tree: AdminCategoryNode[], parentId: string, id: string, name: string, icon?: string): AdminCategoryNode[] {
+  return tree.map((root) => {
+    if (root.id !== parentId) return root;
+    const children = [
+      ...root.children,
+      { id, name, slug: "", icon, order: root.children.length, isActive: true, productCount: 0, children: [] },
+    ];
+    return { ...root, children, hasNoActiveChildren: !children.some((c) => c.isActive) };
+  });
 }
 
 export default function CategoriesPage() {
@@ -142,12 +239,17 @@ export default function CategoriesPage() {
   }
 
   async function toggleVisibility(node: AdminCategoryNode) {
+    const nextActive = !node.isActive;
+    const snapshot = tree;
+    // Cập nhật NGAY, không chờ server — cảm giác tức thời. Nếu request thất
+    // bại (vd bật con khi ngành hàng cha vẫn đang tắt), lùi lại đúng state cũ.
+    setTree((prev) => withVisibility(prev, node.id, nextActive));
     setBusyId(node.id);
     setActionError("");
     try {
-      await setCategoryVisibility(node.id, !node.isActive);
-      await load();
+      await setCategoryVisibility(node.id, nextActive);
     } catch (e) {
+      setTree(snapshot);
       setActionError(e instanceof Error ? e.message : "Không xử lý được.");
     } finally {
       setBusyId(null);
@@ -160,8 +262,10 @@ export default function CategoriesPage() {
     setActionError("");
     try {
       await deleteCategory(toDelete.id);
+      // Xoá hay bị chặn (còn con/sản phẩm) nên KHÔNG xoá lạc quan trước khi
+      // biết kết quả — chỉ cập nhật cục bộ SAU KHI server xác nhận thành công.
+      setTree((prev) => withRemoved(prev, toDelete.id));
       setToDelete(null);
-      await load();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Không xoá được.");
       setToDelete(null);
@@ -248,26 +352,28 @@ export default function CategoriesPage() {
 
         <span draggable={false} className="flex shrink-0 gap-1">
           {depth === 0 && (
-            <GhostButton
+            <IconActionButton
               icon={Plus}
+              label="Thêm danh mục con"
               onClick={() => setModal({ mode: "create-child", parent: { id: node.id, name: node.name } })}
-              className="h-8 w-8 px-0"
-              aria-label="Thêm danh mục con"
             />
           )}
-          <GhostButton
+          <IconActionButton
             icon={node.isActive ? EyeSlash : Eye}
+            label={node.isActive ? "Tắt hiển thị" : "Bật hiển thị"}
             onClick={() => void toggleVisibility(node)}
             disabled={isBusy}
-            className="h-8 w-8 px-0"
-            aria-label={node.isActive ? "Tắt hiển thị" : "Bật hiển thị"}
           />
-          <GhostButton
+          <IconActionButton
             icon={PencilSimple}
+            label="Sửa tên/icon"
             onClick={() => setModal({ mode: "edit", category: node })}
-            className="h-8 w-8 px-0"
           />
-          <GhostButton icon={Trash} onClick={() => setToDelete({ id: node.id, name: node.name })} className="h-8 w-8 px-0" />
+          <IconActionButton
+            icon={Trash}
+            label="Xoá"
+            onClick={() => setToDelete({ id: node.id, name: node.name })}
+          />
         </span>
       </div>
     );
@@ -343,12 +449,30 @@ export default function CategoriesPage() {
         )}
       </Panel>
 
-      {modal?.mode === "create-root" && <CategoryFormModal onClose={() => setModal(null)} onSaved={() => void load()} />}
+      {modal?.mode === "create-root" && (
+        <CategoryFormModal
+          onClose={() => setModal(null)}
+          onSaved={(r) => r.id && setTree((prev) => withNewRoot(prev, r.id!, r.name, r.icon))}
+        />
+      )}
       {modal?.mode === "create-child" && (
-        <CategoryFormModal parent={modal.parent} onClose={() => setModal(null)} onSaved={() => void load()} />
+        <CategoryFormModal
+          parent={modal.parent}
+          onClose={() => setModal(null)}
+          onSaved={(r) => {
+            if (!r.id) return;
+            setTree((prev) => withNewChild(prev, modal.parent.id, r.id!, r.name, r.icon));
+            // Mở luôn ngành hàng cha để thấy ngay danh mục con vừa thêm.
+            setExpanded((prev) => new Set(prev).add(modal.parent.id));
+          }}
+        />
       )}
       {modal?.mode === "edit" && (
-        <CategoryFormModal category={modal.category} onClose={() => setModal(null)} onSaved={() => void load()} />
+        <CategoryFormModal
+          category={modal.category}
+          onClose={() => setModal(null)}
+          onSaved={(r) => setTree((prev) => withPatch(prev, modal.category.id, { name: r.name, icon: r.icon }))}
+        />
       )}
 
       <ConfirmDialog
