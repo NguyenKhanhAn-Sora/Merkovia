@@ -340,6 +340,7 @@ export class PayoutService {
     );
     if (update.matchedCount === 0) return false;
 
+    const payout = await this.payoutModel.findById(payoutId);
     if (result.status === 'failed') {
       // Nhả đơn ra để lần rút sau gom lại được — nếu giữ, tiền của người bán
       // bị kẹt vĩnh viễn vì đơn đã gắn vào một đợt chi thất bại.
@@ -350,17 +351,28 @@ export class PayoutService {
       this.logger.error(
         `Chi trả ${String(payoutId)} thất bại: ${result.failureReason ?? 'không rõ'}`,
       );
-    } else {
-      const payout = await this.payoutModel.findById(payoutId);
+      // Trước đây chỉ ghi log — seller không biết đợt rút của mình đã thất
+      // bại, chỉ phát hiện khi tự vào xem lịch sử. Đối xứng với nhánh `paid`
+      // bên dưới, đều phải báo tin dù kết quả tốt hay xấu.
       if (payout) {
         await this.notifications.notifyShop(payout.shop, {
-          type: 'payout_paid',
-          title: 'Đã chi trả vào tài khoản',
-          body: `Đợt rút ${payout.code} — ${payout.netAmount.toLocaleString('vi-VN')}đ đã được chuyển tới tài khoản của bạn.`,
+          type: 'payout_failed',
+          title: 'Rút tiền không thành công',
+          body: `Đợt rút ${payout.code} — ${payout.netAmount.toLocaleString('vi-VN')}đ không chuyển được${
+            result.failureReason ? `: ${result.failureReason}` : '.'
+          } Đơn hàng liên quan đã được nhả lại, bạn có thể yêu cầu rút lại.`,
           link: `/finance`,
           data: { payoutCode: payout.code, amount: payout.netAmount },
         });
       }
+    } else if (payout) {
+      await this.notifications.notifyShop(payout.shop, {
+        type: 'payout_paid',
+        title: 'Đã chi trả vào tài khoản',
+        body: `Đợt rút ${payout.code} — ${payout.netAmount.toLocaleString('vi-VN')}đ đã được chuyển tới tài khoản của bạn.`,
+        link: `/finance`,
+        data: { payoutCode: payout.code, amount: payout.netAmount },
+      });
     }
     return true;
   }

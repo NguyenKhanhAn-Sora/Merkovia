@@ -12,6 +12,7 @@ import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { ShopSuspensionService } from '../shop-reports/shop-suspension.service';
 import { MailService } from '../auth/mail.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import type { LockScope, QueryAdminUsersDto } from './dto/admin-users.dto';
 
@@ -51,7 +52,46 @@ export class AdminUsersService {
     private readonly suspension: ShopSuspensionService,
     private readonly mail: MailService,
     private readonly auditLog: AuditLogService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  /**
+   * Báo trong app cho đúng (các) phía bị ảnh hưởng — email dễ bị bỏ lỡ hơn
+   * thông báo ngay trong ứng dụng, và mọi hành động admin khác (đình chỉ
+   * shop, duyệt sản phẩm, xử report) đều có cả hai kênh; khoá tài khoản
+   * trước đây chỉ có email là NGOẠI LỆ, không phải chủ ý.
+   */
+  private async notifyLockChange(
+    user: UserDocument,
+    scope: LockScope,
+    locked: boolean,
+  ) {
+    const type = locked ? 'account_locked' : 'account_unlocked';
+    const title = locked
+      ? 'Tài khoản bị hạn chế'
+      : 'Tài khoản đã được gỡ hạn chế';
+    const body = locked
+      ? `Tài khoản của bạn đã bị hạn chế "${SCOPE_LABEL[scope]}".`
+      : `Hạn chế "${SCOPE_LABEL[scope]}" trên tài khoản của bạn đã được gỡ.`;
+
+    if (scope === 'buyer' || scope === 'all') {
+      await this.notifications.notifyUser(user._id, 'buyer', {
+        type,
+        title,
+        body,
+      });
+    }
+    if (
+      (scope === 'seller' || scope === 'all') &&
+      user.roles.includes('seller')
+    ) {
+      await this.notifications.notifyUser(user._id, 'seller', {
+        type,
+        title,
+        body,
+      });
+    }
+  }
 
   async list(query: QueryAdminUsersDto) {
     const tab = query.tab ?? 'all';
@@ -258,6 +298,7 @@ export class AdminUsersService {
           this.logger.warn(`Gửi email khoá tài khoản thất bại: ${String(e)}`),
         );
     }
+    await this.notifyLockChange(user, scope, true);
 
     await this.auditLog.log({
       adminEmail: admin.email,
@@ -310,6 +351,7 @@ export class AdminUsersService {
           ),
         );
     }
+    await this.notifyLockChange(user, scope, false);
 
     await this.auditLog.log({
       adminEmail: admin.email,

@@ -46,6 +46,14 @@ export const NOTIF_TYPES = [
   /** Kiểm duyệt sản phẩm (AI hoặc admin) — xem `ProductModerationService`. */
   'product_approved',
   'product_rejected',
+  /** Đợt rút tiền chốt thất bại (tự động hoặc admin đối soát thủ công) — đơn liên quan đã được nhả lại, seller rút lại được. */
+  'payout_failed',
+  /** Admin xử lý thay tranh chấp huỷ/trả hàng của gian hàng đang bị đình chỉ — seller cần biết admin đã quyết định gì trên đơn của họ. */
+  'cancel_resolved_by_admin',
+  'return_resolved_by_admin',
+  /** Admin chủ động khoá/gỡ khoá tài khoản (ngoài luồng report/đình chỉ shop) — xem `AdminUsersService`. */
+  'account_locked',
+  'account_unlocked',
 ] as const;
 export type NotifType = (typeof NOTIF_TYPES)[number];
 

@@ -1003,6 +1003,15 @@ export class OrdersService {
         link: `/orders/${String(order._id)}`,
         data: { orderId: String(order._id), orderCode: order.orderCode },
       });
+      if (resolvedBy === 'admin') {
+        await this.notifications.notifyShop(order.shop, {
+          type: 'cancel_resolved_by_admin',
+          title: 'Admin đã xử lý yêu cầu huỷ thay bạn',
+          body: `Đơn ${order.orderCode} đang bị đình chỉ nên admin đã thay bạn TỪ CHỐI yêu cầu huỷ của người mua.`,
+          link: `/orders/${String(order._id)}`,
+          data: { orderId: String(order._id), orderCode: order.orderCode },
+        });
+      }
       return { ok: true, order: this.toSellerOrder(order, true) };
     }
 
@@ -1027,6 +1036,15 @@ export class OrdersService {
       link: `/orders/${String(order._id)}`,
       data: { orderId: String(order._id), orderCode: order.orderCode },
     });
+    if (resolvedBy === 'admin') {
+      await this.notifications.notifyShop(order.shop, {
+        type: 'cancel_resolved_by_admin',
+        title: 'Admin đã xử lý yêu cầu huỷ thay bạn',
+        body: `Đơn ${order.orderCode} đang bị đình chỉ nên admin đã thay bạn ĐỒNG Ý huỷ theo yêu cầu của người mua.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+    }
     return res;
   }
 
@@ -1465,6 +1483,15 @@ export class OrdersService {
         link: `/orders/${String(order._id)}`,
         data: { orderId: String(order._id), orderCode: order.orderCode },
       });
+      if (resolvedBy === 'admin') {
+        await this.notifications.notifyShop(order.shop, {
+          type: 'return_resolved_by_admin',
+          title: 'Admin đã xử lý yêu cầu trả hàng thay bạn',
+          body: `Đơn ${order.orderCode} đang bị đình chỉ nên admin đã thay bạn TỪ CHỐI yêu cầu trả hàng của người mua.`,
+          link: `/orders/${String(order._id)}`,
+          data: { orderId: String(order._id), orderCode: order.orderCode },
+        });
+      }
       return { ok: true, order: this.toSellerOrder(order, true) };
     }
 
@@ -1532,6 +1559,15 @@ export class OrdersService {
       link: `/orders/${String(order._id)}`,
       data: { orderId: String(order._id), orderCode: order.orderCode },
     });
+    if (resolvedBy === 'admin') {
+      await this.notifications.notifyShop(order.shop, {
+        type: 'return_resolved_by_admin',
+        title: 'Admin đã xử lý yêu cầu trả hàng thay bạn',
+        body: `Đơn ${order.orderCode} đang bị đình chỉ nên admin đã thay bạn ĐỒNG Ý trả hàng theo yêu cầu của người mua.`,
+        link: `/orders/${String(order._id)}`,
+        data: { orderId: String(order._id), orderCode: order.orderCode },
+      });
+    }
 
     const fresh = await this.orderModel.findById(order._id);
     return { ok: true, order: this.toSellerOrder(fresh!, true) };

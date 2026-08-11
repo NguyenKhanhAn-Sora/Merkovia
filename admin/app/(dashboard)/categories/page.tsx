@@ -282,25 +282,41 @@ export default function CategoriesPage() {
     return (
       <div
         key={node.id}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          setDragCtx({ listKey, id: node.id });
+        }}
+        onDragEnd={() => {
+          // Dọn dẹp DUY NHẤT ở đây (không dùng onDragLeave — dragleave bị bắn
+          // lung tung mỗi khi chuột đi qua ranh giới các phần tử con bên
+          // trong hàng, khiến việc thả không ăn trừ khi đúng ngay rìa dưới).
+          // dragend chỉ bắn MỘT LẦN khi cả thao tác kéo kết thúc, dù thả
+          // thành công hay huỷ giữa chừng — mốc dọn dẹp đáng tin cậy hơn hẳn.
+          setDragCtx(null);
+          setDragOverId(null);
+        }}
         onDragOver={(e) => {
           if (dragCtx?.listKey === listKey) {
             e.preventDefault();
-            if (dragOverId !== node.id) setDragOverId(node.id);
+            // Luôn ghi nhận lại (không chỉ khi đổi) — dragover bắn liên tục
+            // khi chuột còn trong phạm vi CẢ HÀNG (kể cả trên nút/icon con
+            // bên trong), nên thả ở bất kỳ đâu trong hàng đều tính.
+            setDragOverId(node.id);
           }
         }}
-        onDragLeave={() => setDragOverId((id) => (id === node.id ? null : id))}
         onDrop={(e) => {
           e.preventDefault();
-          setDragOverId(null);
           handleDrop(listKey, parentId, node.id);
         }}
-        className={`flex items-center gap-1.5 rounded-xl px-2 py-2.5 transition-colors hover:bg-white/[0.03] ${
+        className={`flex cursor-grab items-center gap-1.5 rounded-xl px-2 py-2.5 transition-colors hover:bg-white/[0.03] active:cursor-grabbing ${
           depth === 1 ? "ml-6 border-l border-white/[0.07] pl-4" : ""
-        } ${isDragOver ? "ring-1 ring-inset ring-cosmic-violet/50" : ""}`}
+        } ${dragCtx?.id === node.id ? "opacity-40" : ""} ${isDragOver ? "ring-1 ring-inset ring-cosmic-violet/50" : ""}`}
       >
         {depth === 0 && (
           <button
             type="button"
+            draggable={false}
             onClick={() => toggleExpand(node.id)}
             aria-label={isExpanded ? "Thu gọn" : "Mở rộng"}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-star/45 transition-transform hover:text-star"
@@ -309,20 +325,7 @@ export default function CategoriesPage() {
           </button>
         )}
 
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.effectAllowed = "move";
-            setDragCtx({ listKey, id: node.id });
-          }}
-          onDragEnd={() => {
-            setDragCtx(null);
-            setDragOverId(null);
-          }}
-          className={`flex min-w-0 flex-1 cursor-grab items-center gap-3 rounded-lg px-1 py-0.5 active:cursor-grabbing ${
-            dragCtx?.id === node.id ? "opacity-40" : ""
-          }`}
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-0.5">
           <DotsSixVertical size={14} className="shrink-0 text-star/25" />
           {depth === 0 ? (
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.05] text-cosmic-violet">

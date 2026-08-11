@@ -8,6 +8,7 @@ import { ShopSuspensionModule } from '../shop-reports/shop-suspension.module';
 import { MailModule } from '../auth/mail.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 /**
  * Module TOP-LEVEL riêng (không nhúng vào `UsersModule`) — `UsersModule` được
@@ -27,6 +28,10 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     MailModule,
     AdminAuthModule,
     AuditLogModule,
+    // An toàn dù nằm trong chuỗi cảnh báo ở trên: module này chỉ TIÊU THỤ
+    // (top-level, không ai import ngược lại), nên dù NotificationsModule kéo
+    // theo AuthModule → UsersModule cũng không khép thành vòng.
+    NotificationsModule,
   ],
   controllers: [AdminUsersController],
   providers: [AdminUsersService],
