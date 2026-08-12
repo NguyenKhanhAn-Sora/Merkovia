@@ -1,48 +1,24 @@
 "use client";
 
-import { useState } from "react";
-import { EyeSlash, Flag, Star } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
+import { Eye, MagnifyingGlass, Package, Star } from "@phosphor-icons/react";
 import {
   Badge,
-  type BadgeTone,
   DataTable,
-  GhostButton,
   Panel,
   PageHeader,
-  PreviewNote,
   TabBar,
   Td,
+  type BadgeTone,
 } from "../../../components/dashboard/ui";
+import ReviewModerationModal from "../../../components/dashboard/ReviewModerationModal";
+import {
+  getReviews,
+  type AdminReviewItem,
+  type AdminReviewListResult,
+} from "../../../lib/reviews-api";
 
-interface Review {
-  product: string;
-  buyer: string;
-  shop: string;
-  rating: number;
-  comment: string;
-  status: "visible" | "flagged" | "hidden";
-  date: string;
-}
-
-const REVIEWS: Review[] = [
-  { product: "Bộ ấm trà gốm men lam", buyer: "Trần Minh An", shop: "Gốm Bát Tràng", rating: 5, comment: "Sản phẩm đẹp, đóng gói cẩn thận, giao nhanh.", status: "visible", date: "10/08/2026" },
-  { product: "Dao phay đầu bếp thép carbon", buyer: "Nguyễn Thu Hà", shop: "Dao Thái Hoà", rating: 1, comment: "Link web abc.xyz giảm giá 90%, mua ngay!!!", status: "flagged", date: "09/08/2026" },
-  { product: "Khăn lụa tơ tằm hoạ tiết", buyer: "Phạm Gia Hân", shop: "Lụa Vạn Phúc", rating: 4, comment: "Chất liệu ổn, màu hơi khác ảnh một chút.", status: "visible", date: "08/08/2026" },
-  { product: "Tượng gỗ trang trí phong thuỷ", buyer: "Lê Quốc Bảo", shop: "Mộc Mỹ Nghệ Sài Gòn", rating: 2, comment: "Spam quảng cáo không liên quan sản phẩm.", status: "hidden", date: "07/08/2026" },
-  { product: "Trà Shan Tuyết cổ thụ 200g", buyer: "Đỗ Anh Tuấn", shop: "Trà Shan Tuyết", rating: 5, comment: "Trà thơm, vị đậm, sẽ ủng hộ tiếp.", status: "visible", date: "06/08/2026" },
-];
-
-const STATUS: Record<Review["status"], { label: string; tone: BadgeTone }> = {
-  visible: { label: "Hiển thị", tone: "success" },
-  flagged: { label: "Bị báo cáo", tone: "danger" },
-  hidden: { label: "Đã ẩn", tone: "neutral" },
-};
-
-const TABS = [
-  { key: "all", label: "Tất cả", count: REVIEWS.length },
-  { key: "flagged", label: "Bị báo cáo", count: REVIEWS.filter((r) => r.status === "flagged").length },
-  { key: "hidden", label: "Đã ẩn", count: REVIEWS.filter((r) => r.status === "hidden").length },
-];
+type HiddenTab = "all" | "hidden" | "visible";
 
 function Stars({ value }: { value: number }) {
   return (
@@ -54,43 +30,177 @@ function Stars({ value }: { value: number }) {
   );
 }
 
+/** Nút icon-only tự đủ class — GhostButton icon-only bị base `px-4` đè mất icon (xem reviews cũ / categories). */
+function IconActionButton({
+  icon: IconCmp,
+  label,
+  onClick,
+}: {
+  icon: typeof Eye;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-star/70 transition-colors hover:border-white/20 hover:text-star active:scale-[0.98]"
+    >
+      <IconCmp size={15} weight="regular" />
+    </button>
+  );
+}
+
 export default function ReviewsPage() {
-  const [tab, setTab] = useState("all");
-  const rows = REVIEWS.filter((r) => tab === "all" || r.status === tab);
+  const [tab, setTab] = useState<HiddenTab>("all");
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+
+  const [data, setData] = useState<AdminReviewListResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [openReview, setOpenReview] = useState<AdminReviewItem | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setData(await getReviews({ hidden: tab, q, page }));
+    } finally {
+      setLoading(false);
+    }
+  }, [tab, q, page]);
+
+  useEffect(() => {
+    const t = setTimeout(() => void load(), q ? 400 : 0);
+    return () => clearTimeout(t);
+  }, [load, q]);
+
+  const c = data?.counts;
+  const tabs: { key: HiddenTab; label: string; count?: number }[] = [
+    { key: "all", label: "Tất cả", count: c?.all },
+    { key: "hidden", label: "Đã ẩn", count: c?.hidden },
+  ];
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
+
+  function applyChanged(updated: AdminReviewItem) {
+    setOpenReview(updated);
+    setData((prev) => {
+      if (!prev) return prev;
+      const items = prev.items.map((it) => (it.id === updated.id ? updated : it));
+      // Đếm lại tab "Đã ẩn" cục bộ thay vì refetch cả trang.
+      const hiddenDelta =
+        (updated.hidden ? 1 : 0) - (prev.items.find((it) => it.id === updated.id)?.hidden ? 1 : 0);
+      return {
+        ...prev,
+        items,
+        counts: { ...prev.counts, hidden: prev.counts.hidden + hiddenDelta },
+      };
+    });
+  }
 
   return (
     <div>
-      <PageHeader title="Đánh giá" description="Kiểm duyệt đánh giá spam hoặc vi phạm chính sách nội dung." />
-      <PreviewNote />
+      <PageHeader title="Đánh giá" description="Kiểm duyệt đánh giá và phản hồi vi phạm chính sách nội dung." />
 
       <Panel padded={false} className="overflow-hidden">
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
-          <TabBar tabs={TABS} value={tab} onChange={setTab} />
+          <TabBar
+            tabs={tabs}
+            value={tab}
+            onChange={(k) => {
+              setTab(k as HiddenTab);
+              setPage(1);
+            }}
+          />
+          <div className="relative mb-5 max-w-sm">
+            <MagnifyingGlass
+              size={17}
+              className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-star/35"
+            />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Tìm theo nội dung đánh giá…"
+              aria-label="Tìm đánh giá"
+              className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star outline-none transition-colors placeholder:text-star/35 focus:border-cosmic-violet/50"
+            />
+          </div>
         </div>
-        <DataTable columns={["Sản phẩm", "Người đánh giá", "Đánh giá", "Gian hàng", "Trạng thái", "Ngày", ""]}>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              <Td className="max-w-[180px] truncate font-medium text-star/85">{r.product}</Td>
-              <Td className="text-star/60">{r.buyer}</Td>
-              <Td className="max-w-[260px]">
-                <Stars value={r.rating} />
-                <p className="mt-1 truncate text-[12.5px] text-star/45">{r.comment}</p>
-              </Td>
-              <Td className="text-star/60">{r.shop}</Td>
-              <Td>
-                <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge>
-              </Td>
-              <Td className="text-star/45">{r.date}</Td>
-              <Td>
-                <span className="flex gap-1.5">
-                  <GhostButton icon={EyeSlash} disabled className="h-9 w-9 px-0" />
-                  <GhostButton icon={Flag} disabled className="h-9 w-9 px-0" />
-                </span>
-              </Td>
-            </tr>
-          ))}
-        </DataTable>
+
+        {!loading && data && data.items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-16 text-star/40">
+            <Package size={28} />
+            <p className="text-[13.5px]">Không có đánh giá nào ở mục này.</p>
+          </div>
+        ) : (
+          <DataTable columns={["Sản phẩm", "Người đánh giá", "Đánh giá", "Gian hàng", "Trạng thái", "Ngày", ""]}>
+            {(data?.items ?? []).map((r: AdminReviewItem) => {
+              const badgeTone: BadgeTone = r.hidden ? "danger" : r.replyHidden ? "warning" : "success";
+              const badgeLabel = r.hidden ? "Đã ẩn" : r.replyHidden ? "Phản hồi bị ẩn" : "Hiển thị";
+              return (
+                <tr key={r.id}>
+                  <Td className="max-w-[180px] truncate font-medium text-star/85">{r.product.name}</Td>
+                  <Td className="text-star/60">{r.buyer.name}</Td>
+                  <Td className="max-w-[260px]">
+                    <Stars value={r.rating} />
+                    {r.comment && <p className="mt-1 truncate text-[12.5px] text-star/45">{r.comment}</p>}
+                  </Td>
+                  <Td className="text-star/60">{r.shop.name}</Td>
+                  <Td>
+                    <Badge tone={badgeTone}>{badgeLabel}</Badge>
+                  </Td>
+                  <Td className="text-star/45">
+                    {r.createdAt ? new Date(r.createdAt).toLocaleDateString("vi-VN") : "—"}
+                  </Td>
+                  <Td>
+                    <IconActionButton icon={Eye} label="Xem chi tiết" onClick={() => setOpenReview(r)} />
+                  </Td>
+                </tr>
+              );
+            })}
+          </DataTable>
+        )}
+
+        {data && totalPages > 1 && (
+          <div className="flex items-center justify-between gap-4 px-6 py-4">
+            <span className="text-[13px] text-star/45">
+              Trang {data.page}/{totalPages} — {data.total} đánh giá
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={data.page <= 1}
+                className="h-9 rounded-lg border border-white/10 px-3 text-[13px] text-star/70 transition-colors hover:border-white/25 disabled:opacity-35"
+              >
+                Trước
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={data.page >= totalPages}
+                className="h-9 rounded-lg border border-white/10 px-3 text-[13px] text-star/70 transition-colors hover:border-white/25 disabled:opacity-35"
+              >
+                Sau
+              </button>
+            </div>
+          </div>
+        )}
       </Panel>
+
+      {openReview && (
+        <ReviewModerationModal
+          review={openReview}
+          onClose={() => setOpenReview(null)}
+          onChanged={applyChanged}
+        />
+      )}
     </div>
   );
 }

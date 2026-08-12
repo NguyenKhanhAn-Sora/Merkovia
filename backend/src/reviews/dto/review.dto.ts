@@ -131,3 +131,47 @@ export class ListShopReviewsDto extends ListReviewsDto {
   @IsIn(['all', 'unanswered', 'low'], { message: 'Bộ lọc không hợp lệ.' })
   tab?: string;
 }
+
+/* -------------------------------- Admin --------------------------------- */
+
+export class AdminListReviewsDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsMongoId({ message: 'Gian hàng không hợp lệ.' })
+  shopId?: string;
+
+  @IsOptional()
+  @IsMongoId({ message: 'Sản phẩm không hợp lệ.' })
+  productId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Bộ lọc số sao không hợp lệ.' })
+  @Min(1)
+  @Max(5)
+  rating?: number;
+
+  /** `hidden` = chỉ đánh giá đã ẩn, `visible` = chỉ đánh giá còn hiển thị. */
+  @IsOptional()
+  @IsIn(['all', 'hidden', 'visible'], { message: 'Bộ lọc không hợp lệ.' })
+  hidden?: string;
+
+  /** Tìm theo nội dung đánh giá, tên người mua, tên sản phẩm hoặc gian hàng. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  q?: string;
+}
+
+/** Ẩn đánh giá hoặc phản hồi — lý do bắt buộc, gửi cho tác giả nội dung bị ẩn. */
+export class HideReviewContentDto {
+  @IsString({ message: 'Vui lòng nhập lý do ẩn.' })
+  @MinLength(5, { message: 'Lý do ẩn cần ít nhất 5 ký tự — nội dung này gửi cho tác giả.' })
+  @MaxLength(300, { message: 'Lý do ẩn tối đa 300 ký tự.' })
+  reason: string;
+}

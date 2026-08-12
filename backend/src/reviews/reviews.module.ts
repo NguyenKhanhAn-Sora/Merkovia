@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Review, ReviewSchema } from './schemas/review.schema';
 import { ReviewsService } from './reviews.service';
 import {
+  AdminReviewsController,
   ProductReviewsController,
   ReviewsController,
   ShopReviewsController,
@@ -13,6 +14,8 @@ import { ProfilesModule } from '../profiles/profiles.module';
 import { ShopsModule } from '../shops/shops.module';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AdminAuthModule } from '../admin-auth/admin-auth.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 /**
  * Đánh giá sản phẩm sau khi mua.
@@ -30,11 +33,14 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ShopsModule, // gian hàng của người bán
     AuthModule, // JwtAuthGuard
     NotificationsModule, // báo đánh giá mới cho người bán
+    AdminAuthModule, // AdminAuthGuard (trang quản trị)
+    AuditLogModule, // ghi nhật ký khi admin ẩn/gỡ ẩn đánh giá hoặc phản hồi
   ],
   controllers: [
     ProductReviewsController,
     ReviewsController,
     ShopReviewsController,
+    AdminReviewsController,
   ],
   providers: [ReviewsService],
   exports: [ReviewsService, MongooseModule],

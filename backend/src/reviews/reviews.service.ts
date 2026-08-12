@@ -10,7 +10,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Review, ReviewDocument } from './schemas/review.schema';
 import {
+  AdminListReviewsDto,
   CreateReviewDto,
+  HideReviewContentDto,
   ListReviewsDto,
   ListShopReviewsDto,
   ReplyReviewDto,
@@ -21,8 +23,14 @@ import { Product, ProductDocument } from '../products/schemas/product.schema';
 import { Profile, ProfileDocument } from '../profiles/schemas/profile.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 import { config } from '../config/config';
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 const PAGE_SIZE = 10;
 
@@ -57,6 +65,7 @@ export class ReviewsService {
     @InjectModel(Shop.name)
     private readonly shopModel: Model<ShopDocument>,
     private readonly notifications: NotificationsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   /* ------------------------------ Người mua ------------------------------ */
@@ -256,6 +265,8 @@ export class ReviewsService {
      */
     const filter: Record<string, unknown> = {
       product: new Types.ObjectId(productId),
+      // Đánh giá bị admin ẩn không bao giờ lộ ra trang công khai.
+      hidden: { $ne: true },
     };
     if (query.rating) filter.rating = query.rating;
     // `$ne: []` chứ không phải `$exists`: mảng rỗng vẫn tồn tại.
@@ -303,7 +314,11 @@ export class ReviewsService {
       this.reviewModel.countDocuments({ ...base, reply: { $in: [null, ''] } }),
       this.reviewModel.countDocuments({ ...base, rating: { $lte: 3 } }),
       this.reviewModel.aggregate<{ _id: number; count: number }>([
-        { $match: { shop: shop._id } },
+        // Đánh giá bị admin ẩn không được tính vào điểm sao hiển thị — con số
+        // này phải khớp với những gì buyer thấy công khai, không phải toàn bộ
+        // kho đánh giá seller có (kể cả hàng đã ẩn thì vẫn thấy trong `items`
+        // để seller biết vì sao rớt điểm, nhưng không được TÍNH vào điểm nữa).
+        { $match: { shop: shop._id, hidden: { $ne: true } } },
         { $group: { _id: '$rating', count: { $sum: 1 } } },
       ]),
     ]);
@@ -313,9 +328,11 @@ export class ReviewsService {
     // bình sẽ ra số sai).
     const breakdown = [0, 0, 0, 0, 0];
     let sum = 0;
+    let liveCount = 0;
     for (const g of grouped) {
       if (g._id >= 1 && g._id <= 5) breakdown[g._id - 1] = g.count;
       sum += g._id * g.count;
+      liveCount += g.count;
     }
 
     return {
@@ -323,10 +340,13 @@ export class ReviewsService {
       total,
       page,
       limit: PAGE_SIZE,
+      // `all/unanswered/low` = tổng KHO đánh giá (kể cả đã ẩn) — số trên tab.
       counts: { all, unanswered, low },
+      // Điểm sao chỉ tính từ đánh giá CÒN HIỂN THỊ — phải khớp với `liveCount`
+      // của `grouped` (đã lọc `hidden`), không phải `all`, kẻo mẫu số sai.
       summary: {
-        ratingAvg: all > 0 ? Math.round((sum / all) * 10) / 10 : 0,
-        ratingCount: all,
+        ratingAvg: liveCount > 0 ? Math.round((sum / liveCount) * 10) / 10 : 0,
+        ratingCount: liveCount,
         breakdown,
       },
     };
@@ -360,6 +380,297 @@ export class ReviewsService {
     await review.save();
 
     return { review: await this.publicReview(review, { forShop: true }) };
+  }
+
+  /* ------------------------------- Admin --------------------------------- */
+
+  /**
+   * Danh sách đánh giá cho trang kiểm duyệt của admin — thấy CẢ đánh giá đã
+   * ẩn (khác `listForProduct`/`listForShop`), kèm đủ ngữ cảnh (người mua,
+   * sản phẩm, gian hàng, đơn hàng) để admin không phải mở nhiều tab mới xét
+   * được một đánh giá.
+   */
+  async adminList(query: AdminListReviewsDto) {
+    const filter: Record<string, unknown> = {};
+    if (query.shopId && Types.ObjectId.isValid(query.shopId)) {
+      filter.shop = new Types.ObjectId(query.shopId);
+    }
+    if (query.productId && Types.ObjectId.isValid(query.productId)) {
+      filter.product = new Types.ObjectId(query.productId);
+    }
+    if (query.rating) filter.rating = query.rating;
+    if (query.hidden === 'hidden') filter.hidden = true;
+    if (query.hidden === 'visible') filter.hidden = { $ne: true };
+
+    const term = query.q?.trim();
+    if (term) filter.comment = { $regex: escapeRegex(term), $options: 'i' };
+
+    const page = Math.max(1, query.page ?? 1);
+    const [items, total, allCount, hiddenCount] = await Promise.all([
+      this.reviewModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * PAGE_SIZE)
+        .limit(PAGE_SIZE)
+        .populate<{
+          buyer: { _id: Types.ObjectId; email?: string; phone?: string };
+        }>('buyer', 'email phone')
+        .lean(),
+      this.reviewModel.countDocuments(filter),
+      this.reviewModel.countDocuments({}),
+      this.reviewModel.countDocuments({ hidden: true }),
+    ]);
+
+    return {
+      items: await this.adminShape(items),
+      total,
+      page,
+      limit: PAGE_SIZE,
+      counts: { all: allCount, hidden: hiddenCount },
+    };
+  }
+
+  /** Gắn tên người mua/sản phẩm/gian hàng/đơn hàng cho một loạt hàng chờ admin xét. */
+  private async adminShape(
+    reviews: (Omit<Review, 'buyer'> & {
+      _id: Types.ObjectId;
+      createdAt?: Date;
+      buyer: { _id: Types.ObjectId; email?: string; phone?: string };
+    })[],
+  ) {
+    if (reviews.length === 0) return [];
+
+    const buyerIds = [...new Set(reviews.map((r) => String(r.buyer._id)))].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const productIds = [...new Set(reviews.map((r) => String(r.product)))].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const shopIds = [...new Set(reviews.map((r) => String(r.shop)))].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const orderIds = [...new Set(reviews.map((r) => String(r.order)))].map(
+      (id) => new Types.ObjectId(id),
+    );
+
+    const [profiles, products, shops, orders] = await Promise.all([
+      this.profileModel
+        .find({ user: { $in: buyerIds } })
+        .select('user fullName displayName')
+        .lean(),
+      this.productModel
+        .find({ _id: { $in: productIds } })
+        .select('name images')
+        .lean(),
+      this.shopModel.find({ _id: { $in: shopIds } }).select('name').lean(),
+      this.orderModel
+        .find({ _id: { $in: orderIds } })
+        .select('orderCode')
+        .lean(),
+    ]);
+    const byProfile = new Map(profiles.map((p) => [String(p.user), p]));
+    const byProduct = new Map(products.map((p) => [String(p._id), p]));
+    const byShop = new Map(shops.map((s) => [String(s._id), s]));
+    const byOrder = new Map(orders.map((o) => [String(o._id), o]));
+
+    return reviews.map((r) => {
+      const profile = byProfile.get(String(r.buyer._id));
+      const product = byProduct.get(String(r.product));
+      const shop = byShop.get(String(r.shop));
+      const order = byOrder.get(String(r.order));
+      return {
+        id: String(r._id),
+        rating: r.rating,
+        comment: r.comment,
+        media: r.media.map((m) => ({ kind: m.kind, url: m.url })),
+        variantLabel: r.variantLabel,
+        anonymous: r.anonymous,
+        buyer: {
+          name: profile?.fullName || profile?.displayName || 'Người mua',
+          contact: r.buyer.email || r.buyer.phone || '—',
+        },
+        product: {
+          id: String(r.product),
+          name: product?.name ?? '(sản phẩm đã bị gỡ)',
+          image: product?.images?.[0]?.url,
+        },
+        shop: { id: String(r.shop), name: shop?.name ?? '(gian hàng đã gỡ)' },
+        order: { id: String(r.order), orderCode: order?.orderCode ?? '—' },
+        reply: r.reply,
+        repliedAt: r.repliedAt,
+        hidden: r.hidden,
+        hiddenAt: r.hiddenAt,
+        hiddenBy: r.hiddenBy,
+        hiddenReason: r.hiddenReason,
+        replyHidden: r.replyHidden,
+        replyHiddenAt: r.replyHiddenAt,
+        replyHiddenBy: r.replyHiddenBy,
+        replyHiddenReason: r.replyHiddenReason,
+        createdAt: r.createdAt,
+      };
+    });
+  }
+
+  /**
+   * Ẩn toàn bộ đánh giá (rating + comment + media) khỏi trang sản phẩm — dùng
+   * cho đánh giá spam/vi phạm chính sách. Trừ luôn điểm sao khỏi `Product.stats`
+   * vì đánh giá không còn được tính là "còn hiển thị" nữa.
+   */
+  async adminHide(
+    admin: AdminPrincipal,
+    reviewId: string,
+    dto: HideReviewContentDto,
+  ) {
+    const review = await this.findReviewOrThrow(reviewId);
+    if (review.hidden) {
+      throw new BadRequestException('Đánh giá này đã bị ẩn rồi.');
+    }
+
+    review.hidden = true;
+    review.hiddenAt = new Date();
+    review.hiddenBy = admin.email;
+    review.hiddenReason = dto.reason.trim();
+    await review.save();
+
+    await this.applyRatingDelta(review.product, deltaFor(review.rating, -1));
+
+    await this.notifications.notifyUser(review.buyer, 'buyer', {
+      type: 'review_hidden',
+      title: 'Đánh giá của bạn đã bị ẩn',
+      body: `Đánh giá ${review.rating}★ của bạn đã bị quản trị viên ẩn khỏi trang sản phẩm. Lý do: ${review.hiddenReason}`,
+      link: `/orders/${String(review.order)}`,
+    });
+
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: 'Ẩn đánh giá',
+      targetLabel: `Đánh giá ${review.rating}★`,
+      detail: review.hiddenReason,
+    });
+
+    return { review: await this.adminShapeOne(review) };
+  }
+
+  /** Gỡ ẩn — cộng lại điểm sao theo rating HIỆN TẠI của đánh giá (có thể đã được buyer sửa trong lúc đang ẩn). */
+  async adminUnhide(admin: AdminPrincipal, reviewId: string) {
+    const review = await this.findReviewOrThrow(reviewId);
+    if (!review.hidden) {
+      throw new BadRequestException('Đánh giá này hiện không bị ẩn.');
+    }
+
+    review.hidden = false;
+    review.hiddenAt = undefined;
+    review.hiddenBy = undefined;
+    review.hiddenReason = undefined;
+    await review.save();
+
+    await this.applyRatingDelta(review.product, deltaFor(review.rating, +1));
+
+    await this.notifications.notifyUser(review.buyer, 'buyer', {
+      type: 'review_unhidden',
+      title: 'Đánh giá của bạn đã được khôi phục',
+      body: `Đánh giá ${review.rating}★ của bạn đã hiển thị trở lại trên trang sản phẩm.`,
+      link: `/orders/${String(review.order)}`,
+    });
+
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: 'Gỡ ẩn đánh giá',
+      targetLabel: `Đánh giá ${review.rating}★`,
+    });
+
+    return { review: await this.adminShapeOne(review) };
+  }
+
+  /**
+   * Ẩn riêng phần PHẢN HỒI của shop — dùng khi chính phản hồi vi phạm (VD:
+   * shop trả đũa buyer), không phạt oan đánh giá thật của buyer. Không tính
+   * vào điểm sao (phản hồi chưa từng ảnh hưởng điểm).
+   */
+  async adminHideReply(
+    admin: AdminPrincipal,
+    reviewId: string,
+    dto: HideReviewContentDto,
+  ) {
+    const review = await this.findReviewOrThrow(reviewId);
+    if (!review.reply) {
+      throw new BadRequestException('Đánh giá này chưa có phản hồi.');
+    }
+    if (review.replyHidden) {
+      throw new BadRequestException('Phản hồi này đã bị ẩn rồi.');
+    }
+
+    review.replyHidden = true;
+    review.replyHiddenAt = new Date();
+    review.replyHiddenBy = admin.email;
+    review.replyHiddenReason = dto.reason.trim();
+    await review.save();
+
+    await this.notifications.notifyShop(review.shop, {
+      type: 'review_reply_hidden',
+      title: 'Phản hồi đánh giá của bạn đã bị ẩn',
+      body: `Phản hồi của bạn cho một đánh giá đã bị quản trị viên ẩn khỏi trang sản phẩm. Lý do: ${review.replyHiddenReason}`,
+      link: '/reviews',
+    });
+
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: 'Ẩn phản hồi đánh giá',
+      targetLabel: `Đánh giá ${review.rating}★`,
+      detail: review.replyHiddenReason,
+    });
+
+    return { review: await this.adminShapeOne(review) };
+  }
+
+  async adminUnhideReply(admin: AdminPrincipal, reviewId: string) {
+    const review = await this.findReviewOrThrow(reviewId);
+    if (!review.replyHidden) {
+      throw new BadRequestException('Phản hồi này hiện không bị ẩn.');
+    }
+
+    review.replyHidden = false;
+    review.replyHiddenAt = undefined;
+    review.replyHiddenBy = undefined;
+    review.replyHiddenReason = undefined;
+    await review.save();
+
+    await this.notifications.notifyShop(review.shop, {
+      type: 'review_reply_unhidden',
+      title: 'Phản hồi đánh giá của bạn đã được khôi phục',
+      body: `Phản hồi của bạn đã hiển thị trở lại trên trang sản phẩm.`,
+      link: '/reviews',
+    });
+
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: 'Gỡ ẩn phản hồi đánh giá',
+      targetLabel: `Đánh giá ${review.rating}★`,
+    });
+
+    return { review: await this.adminShapeOne(review) };
+  }
+
+  private async findReviewOrThrow(reviewId: string): Promise<ReviewDocument> {
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new NotFoundException('Không tìm thấy đánh giá.');
+    }
+    const review = await this.reviewModel.findById(reviewId);
+    if (!review) throw new NotFoundException('Không tìm thấy đánh giá.');
+    return review;
+  }
+
+  /** Bọc một đánh giá vừa xử lý xong lại thành dạng admin-list để trả về cho client. */
+  private async adminShapeOne(review: ReviewDocument) {
+    const lean = await this.reviewModel
+      .findById(review._id)
+      .populate<{
+        buyer: { _id: Types.ObjectId; email?: string; phone?: string };
+      }>('buyer', 'email phone')
+      .lean();
+    if (!lean) return null;
+    const [shaped] = await this.adminShape([lean]);
+    return shaped;
   }
 
   /* ------------------------------ Nội bộ -------------------------------- */
@@ -512,6 +823,9 @@ export class ReviewsService {
     shop?: { name?: string; logoUrl?: string },
   ) {
     const realName = profile?.fullName || profile?.displayName || '';
+    // Phản hồi bị admin ẩn (vì chính phản hồi vi phạm) không lộ ra công khai,
+    // nhưng seller vẫn thấy phản hồi CỦA CHÍNH MÌNH để biết đã viết gì.
+    const showReply = !!r.reply && (opts.forShop || !r.replyHidden);
     return {
       id: String(r._id),
       rating: r.rating,
@@ -523,17 +837,26 @@ export class ReviewsService {
         name: r.anonymous ? maskName(realName) : realName || 'Người mua',
         avatarUrl: r.anonymous ? undefined : profile?.avatarUrl,
       },
-      reply: r.reply,
+      reply: showReply ? r.reply : undefined,
       // Tên + logo shop để phần phản hồi có mặt người bán, không chỉ trơ chữ.
-      ...(r.reply
+      ...(showReply
         ? { replyBy: { name: shop?.name, logoUrl: shop?.logoUrl } }
         : {}),
-      repliedAt: r.repliedAt,
-      replyEdited: !!r.replyEditedAt,
+      repliedAt: showReply ? r.repliedAt : undefined,
+      replyEdited: showReply ? !!r.replyEditedAt : false,
       edited: r.edited,
       createdAt: (r as unknown as { createdAt: Date }).createdAt,
-      // Người bán cần biết đánh giá thuộc sản phẩm nào để mở đúng trang.
-      ...(opts.forShop ? { productId: String(r.product) } : {}),
+      // Người bán cần biết đánh giá thuộc sản phẩm nào để mở đúng trang, và
+      // trạng thái kiểm duyệt để hiểu vì sao một đánh giá/phản hồi biến mất.
+      ...(opts.forShop
+        ? {
+            productId: String(r.product),
+            hidden: r.hidden,
+            hiddenReason: r.hiddenReason,
+            replyHidden: r.replyHidden,
+            replyHiddenReason: r.replyHiddenReason,
+          }
+        : {}),
     };
   }
 }

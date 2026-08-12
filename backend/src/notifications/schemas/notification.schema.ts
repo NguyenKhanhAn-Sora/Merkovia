@@ -54,6 +54,12 @@ export const NOTIF_TYPES = [
   /** Admin chủ động khoá/gỡ khoá tài khoản (ngoài luồng report/đình chỉ shop) — xem `AdminUsersService`. */
   'account_locked',
   'account_unlocked',
+  /** Admin ẩn/gỡ ẩn đánh giá vi phạm — gửi cho NGƯỜI VIẾT đánh giá (buyer). */
+  'review_hidden',
+  'review_unhidden',
+  /** Admin ẩn/gỡ ẩn riêng phần phản hồi của shop — gửi cho SHOP (seller). */
+  'review_reply_hidden',
+  'review_reply_unhidden',
 ] as const;
 export type NotifType = (typeof NOTIF_TYPES)[number];
 

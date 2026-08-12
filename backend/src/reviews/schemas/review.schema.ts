@@ -93,6 +93,45 @@ export class Review {
    */
   @Prop({ default: false })
   edited: boolean;
+
+  /* --------------------------- Kiểm duyệt (admin) ------------------------- */
+
+  /**
+   * Admin ẩn toàn bộ đánh giá (rating + comment + media) khỏi trang sản phẩm
+   * và khỏi điểm sao trung bình — dùng cho đánh giá spam/vi phạm chính sách.
+   * Không xoá: giữ nguyên bằng chứng, và có thể gỡ ẩn lại nếu admin xét nhầm.
+   * KHÔNG tự gỡ khi buyer sửa đánh giá — giống đình chỉ shop, chỉ admin mới
+   * đảo trạng thái, tránh việc chỉnh sửa vô hiệu hoá quyết định kiểm duyệt.
+   */
+  @Prop({ default: false, index: true })
+  hidden: boolean;
+
+  @Prop()
+  hiddenAt?: Date;
+
+  /** Email admin đã ẩn — admin không có collection riêng, xem `AdminPrincipal`. */
+  @Prop({ trim: true })
+  hiddenBy?: string;
+
+  @Prop({ trim: true, maxlength: 300 })
+  hiddenReason?: string;
+
+  /**
+   * Admin ẩn riêng PHẦN PHẢN HỒI của shop (không đụng tới đánh giá của
+   * buyer) — dùng khi chính phản hồi mới là thứ vi phạm (ví dụ shop trả đũa
+   * buyer trong phần trả lời), để không phạt oan đánh giá thật của buyer.
+   */
+  @Prop({ default: false })
+  replyHidden: boolean;
+
+  @Prop()
+  replyHiddenAt?: Date;
+
+  @Prop({ trim: true })
+  replyHiddenBy?: string;
+
+  @Prop({ trim: true, maxlength: 300 })
+  replyHiddenReason?: string;
 }
 
 export const ReviewSchema = SchemaFactory.createForClass(Review);
