@@ -1,4 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import {
+  ShippingSettings,
+  ShippingSettingsDocument,
+} from './schemas/shipping-settings.schema';
 
 /** Một đầu của tuyến vận chuyển (kho người bán hoặc địa chỉ người nhận). */
 export interface ShippingPoint {
@@ -61,36 +67,94 @@ export abstract class ShippingProvider {
  * ------------------------------------------------------------------ */
 
 /** Cước cơ bản cho 1kg đầu + phụ phí mỗi 500g tiếp theo, theo từng vùng. */
-const RATES: Record<
+export type ShippingRatesTable = Record<
   ShippingZone,
   { base: number; perHalfKg: number; eta: { min: number; max: number } }
-> = {
-  intra_province: { base: 16_500, perHalfKg: 5_000, eta: { min: 1, max: 2 } },
-  inter_province: { base: 30_000, perHalfKg: 8_000, eta: { min: 2, max: 4 } },
-  long_haul: { base: 40_000, perHalfKg: 12_000, eta: { min: 3, max: 6 } },
+>;
+
+export interface ShippingRatesSnapshot {
+  rates: ShippingRatesTable;
+  freeShippingThreshold: number;
+  longHaulKm: number;
+}
+
+/**
+ * Giá trị mặc định — dùng khi CHƯA có bản ghi `ShippingSettings` nào trong DB
+ * (lần chạy đầu) và làm mẫu để `ShippingSettingsService` khởi tạo bản ghi đầu
+ * tiên. Đây chính là biểu cước cũ từng hardcode ở đây — giữ nguyên số liệu để
+ * không có cú nhảy giá bất ngờ nào ngay lúc triển khai tính năng này.
+ */
+export const DEFAULT_SHIPPING_RATES: ShippingRatesSnapshot = {
+  rates: {
+    intra_province: { base: 16_500, perHalfKg: 5_000, eta: { min: 1, max: 2 } },
+    inter_province: { base: 30_000, perHalfKg: 8_000, eta: { min: 2, max: 4 } },
+    long_haul: { base: 40_000, perHalfKg: 12_000, eta: { min: 3, max: 6 } },
+  },
+  freeShippingThreshold: 500_000,
+  longHaulKm: 500,
 };
 
-/** Khối lượng đã gồm trong cước cơ bản. */
+/** Khối lượng đã gồm trong cước cơ bản — hằng số kỹ thuật, KHÔNG cho admin sửa (xem ghi chú ở `ShippingSettingsService`). */
 const INCLUDED_GRAM = 1_000;
 
-/** Từ mốc này coi là tuyến xa (chỉ áp dụng khi biết toạ độ hai đầu). */
-const LONG_HAUL_KM = 500;
-
-/** Tiền hàng từ mức này trở lên thì miễn phí vận chuyển. */
-const FREE_SHIPPING_THRESHOLD = 500_000;
-
-/** Hệ số quy đổi khối lượng theo thể tích (chuẩn chuyển phát đường bộ). */
+/** Hệ số quy đổi khối lượng theo thể tích (chuẩn chuyển phát đường bộ) — hằng số kỹ thuật, KHÔNG cho admin sửa. */
 export const VOLUMETRIC_DIVISOR = 6_000;
 
 @Injectable()
-export class TableShippingProvider extends ShippingProvider {
+export class TableShippingProvider extends ShippingProvider implements OnModuleInit {
   readonly name = 'Biểu cước Merkovia';
   readonly isCarrier = false;
+  private readonly logger = new Logger(TableShippingProvider.name);
+
+  /**
+   * Cache trong bộ nhớ — `quote()` phải luôn ĐỒNG BỘ (được gọi trực tiếp
+   * trong luồng đặt hàng, không `await` được) nên không thể đọc DB mỗi lần
+   * tính cước. Khởi tạo sẵn bằng giá trị mặc định để `quote()` không bao giờ
+   * rơi vào trạng thái chưa có dữ liệu, kể cả trước khi `onModuleInit` chạy
+   * xong hay khi DB tạm thời lỗi.
+   */
+  private snapshot: ShippingRatesSnapshot = DEFAULT_SHIPPING_RATES;
+
+  constructor(
+    @InjectModel(ShippingSettings.name)
+    private readonly settingsModel: Model<ShippingSettingsDocument>,
+  ) {
+    super();
+  }
+
+  async onModuleInit() {
+    await this.refreshFromDb();
+  }
+
+  /**
+   * Nạp lại cache từ DB — gọi lúc khởi động VÀ ngay sau mỗi lần admin lưu
+   * biểu cước mới, để thay đổi có hiệu lực tức thì, không cần khởi động lại
+   * server. Đọc lỗi thì GIỮ NGUYÊN cache cũ (không để một đợt lỗi DB thoáng
+   * qua làm luồng đặt hàng đang chạy tốt bỗng dưng vỡ).
+   */
+  async refreshFromDb(): Promise<void> {
+    try {
+      const doc = await this.settingsModel.findOne().lean();
+      if (!doc) return; // chưa có bản ghi nào — giữ nguyên mặc định
+      this.snapshot = {
+        rates: {
+          intra_province: zoneToRate(doc.intra_province),
+          inter_province: zoneToRate(doc.inter_province),
+          long_haul: zoneToRate(doc.long_haul),
+        },
+        freeShippingThreshold: doc.freeShippingThreshold,
+        longHaulKm: doc.longHaulKm,
+      };
+    } catch (err: unknown) {
+      this.logger.warn(`Không nạp lại được biểu cước, giữ cache cũ: ${String(err)}`);
+    }
+  }
 
   quote(input: ShippingQuoteInput): ShippingQuote {
+    const { rates, freeShippingThreshold, longHaulKm } = this.snapshot;
     const distanceKm = haversineKm(input.from, input.to);
-    const zone = resolveZone(input.from, input.to, distanceKm);
-    const rate = RATES[zone];
+    const zone = resolveZone(input.from, input.to, distanceKm, longHaulKm);
+    const rate = rates[zone];
 
     // Làm tròn LÊN theo mốc 500g: hãng vận chuyển nào cũng tính vậy, và làm
     // tròn xuống sẽ khiến sàn bù lỗ ở mọi đơn lẻ.
@@ -101,7 +165,7 @@ export class TableShippingProvider extends ShippingProvider {
     // Làm tròn tới 500đ cho số tiền dễ đọc, giống bảng giá thực tế.
     const baseFee = Math.round(raw / 500) * 500;
 
-    const freeShipping = input.itemsTotal >= FREE_SHIPPING_THRESHOLD;
+    const freeShipping = input.itemsTotal >= freeShippingThreshold;
     const discount = freeShipping ? baseFee : 0;
 
     return {
@@ -131,6 +195,7 @@ export function resolveZone(
   from: ShippingPoint,
   to: ShippingPoint,
   distanceKm: number | null,
+  longHaulKm: number = DEFAULT_SHIPPING_RATES.longHaulKm,
 ): ShippingZone {
   if (
     from.provinceCode != null &&
@@ -142,7 +207,7 @@ export function resolveZone(
   if (distanceKm != null) {
     // Có toạ độ nhưng thiếu mã tỉnh: rất gần thì vẫn coi là nội tỉnh.
     if (distanceKm < 30 && from.provinceCode == null) return 'intra_province';
-    return distanceKm >= LONG_HAUL_KM ? 'long_haul' : 'inter_province';
+    return distanceKm >= longHaulKm ? 'long_haul' : 'inter_province';
   }
   return 'inter_province';
 }
@@ -188,9 +253,18 @@ export function chargeableWeight(item: {
   return Math.max(actual, volumetric);
 }
 
+/**
+ * Hằng số kỹ thuật CỐ ĐỊNH, không nằm trong biểu cước admin sửa được — theo
+ * chuẩn ngành vận chuyển đường bộ, không phải đòn bẩy kinh doanh. Xuất ra để
+ * trang quản trị hiển thị (chỉ đọc) cho admin biết hệ thống đang quy đổi thế
+ * nào, tránh nhầm tưởng đây cũng là số có thể chỉnh.
+ */
 export const SHIPPING_CONSTANTS = {
-  FREE_SHIPPING_THRESHOLD,
   INCLUDED_GRAM,
-  LONG_HAUL_KM,
   VOLUMETRIC_DIVISOR,
 };
+
+/** Chuyển subdocument DB (`ShippingZoneRate`) sang định dạng nội bộ của cache. */
+function zoneToRate(z: { base: number; perHalfKg: number; etaMinDays: number; etaMaxDays: number }) {
+  return { base: z.base, perHalfKg: z.perHalfKg, eta: { min: z.etaMinDays, max: z.etaMaxDays } };
+}
