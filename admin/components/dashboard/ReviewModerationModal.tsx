@@ -20,6 +20,7 @@ import {
   type AdminReviewItem,
 } from "../../lib/reviews-api";
 import { Badge } from "./ui";
+import MediaLightbox from "./MediaLightbox";
 
 function fmtDate(d?: string) {
   if (!d) return "—";
@@ -145,6 +146,7 @@ export default function ReviewModerationModal({
 }) {
   const [busyReview, setBusyReview] = useState(false);
   const [busyReply, setBusyReply] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [errorReview, setErrorReview] = useState("");
   const [errorReply, setErrorReply] = useState("");
 
@@ -260,12 +262,12 @@ export default function ReviewModerationModal({
             {r.media.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {r.media.map((m, i) => (
-                  <a
+                  <button
                     key={m.url + i}
-                    href={m.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] text-star/60"
+                    type="button"
+                    onClick={() => setLightboxIndex(i)}
+                    aria-label={`Xem ${m.kind === "video" ? "video" : "ảnh"} ${i + 1} toàn màn hình`}
+                    className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] text-star/60 transition-colors hover:border-white/25"
                   >
                     {m.kind === "video" ? (
                       <PlayCircle size={22} weight="fill" />
@@ -273,7 +275,7 @@ export default function ReviewModerationModal({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={m.url} alt="" className="h-full w-full object-cover" />
                     )}
-                  </a>
+                  </button>
                 ))}
               </div>
             )}
@@ -344,6 +346,13 @@ export default function ReviewModerationModal({
           </button>
         </div>
       </div>
+
+      <MediaLightbox
+        items={r.media}
+        index={lightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onIndexChange={setLightboxIndex}
+      />
     </div>
   );
 }

@@ -399,8 +399,15 @@ export class ReviewsService {
       filter.product = new Types.ObjectId(query.productId);
     }
     if (query.rating) filter.rating = query.rating;
-    if (query.hidden === 'hidden') filter.hidden = true;
-    if (query.hidden === 'visible') filter.hidden = { $ne: true };
+    // "Đã ẩn" = review bị ẩn HOẶC reply bị ẩn — admin cần thấy cả hai loại
+    // trong cùng hàng đợi kiểm duyệt, kẻo quên mất những review chỉ-ẩn-reply.
+    if (query.hidden === 'hidden') {
+      filter.$or = [{ hidden: true }, { replyHidden: true }];
+    }
+    if (query.hidden === 'visible') {
+      filter.hidden = { $ne: true };
+      filter.replyHidden = { $ne: true };
+    }
 
     const term = query.q?.trim();
     if (term) filter.comment = { $regex: escapeRegex(term), $options: 'i' };
@@ -418,7 +425,7 @@ export class ReviewsService {
         .lean(),
       this.reviewModel.countDocuments(filter),
       this.reviewModel.countDocuments({}),
-      this.reviewModel.countDocuments({ hidden: true }),
+      this.reviewModel.countDocuments({ $or: [{ hidden: true }, { replyHidden: true }] }),
     ]);
 
     return {

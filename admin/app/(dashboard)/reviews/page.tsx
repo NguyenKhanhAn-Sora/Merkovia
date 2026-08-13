@@ -88,14 +88,28 @@ export default function ReviewsPage() {
     setOpenReview(updated);
     setData((prev) => {
       if (!prev) return prev;
-      const items = prev.items.map((it) => (it.id === updated.id ? updated : it));
-      // Đếm lại tab "Đã ẩn" cục bộ thay vì refetch cả trang.
-      const hiddenDelta =
-        (updated.hidden ? 1 : 0) - (prev.items.find((it) => it.id === updated.id)?.hidden ? 1 : 0);
+      const before = prev.items.find((it) => it.id === updated.id);
+      // "Đã ẩn" = review HOẶC reply đang bị ẩn — khớp đúng định nghĩa backend.
+      const wasHidden = !!(before?.hidden || before?.replyHidden);
+      const isHidden = updated.hidden || updated.replyHidden;
+
+      // Gỡ ẩn xong mà đang xem tab "Đã ẩn" (hoặc ngược lại, vừa ẩn mà đang xem
+      // tab "Hiển thị" — không có ở trang này nhưng cùng logic) thì hàng đó
+      // phải biến mất khỏi danh sách NGAY, không đợi tải lại trang.
+      const stillMatchesTab = tab === "all" ? true : tab === "hidden" ? isHidden : !isHidden;
+
+      const items = stillMatchesTab
+        ? prev.items.map((it) => (it.id === updated.id ? updated : it))
+        : prev.items.filter((it) => it.id !== updated.id);
+
       return {
         ...prev,
         items,
-        counts: { ...prev.counts, hidden: prev.counts.hidden + hiddenDelta },
+        total: stillMatchesTab ? prev.total : Math.max(0, prev.total - 1),
+        counts: {
+          ...prev.counts,
+          hidden: prev.counts.hidden + ((isHidden ? 1 : 0) - (wasHidden ? 1 : 0)),
+        },
       };
     });
   }
