@@ -52,6 +52,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function getReviews(params: {
   hidden?: "all" | "hidden" | "visible";
   rating?: number;
+  hasMedia?: "true" | "false";
   q?: string;
   page?: number;
 }): Promise<AdminReviewListResult> {

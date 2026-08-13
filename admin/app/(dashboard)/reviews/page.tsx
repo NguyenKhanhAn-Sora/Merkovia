@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Eye, MagnifyingGlass, Package, Star } from "@phosphor-icons/react";
+import { Eye, Image as ImageIcon, MagnifyingGlass, Package, Star } from "@phosphor-icons/react";
 import {
   Badge,
   DataTable,
@@ -56,6 +56,8 @@ function IconActionButton({
 export default function ReviewsPage() {
   const [tab, setTab] = useState<HiddenTab>("all");
   const [q, setQ] = useState("");
+  const [ratingFilter, setRatingFilter] = useState<number | undefined>(undefined);
+  const [mediaOnly, setMediaOnly] = useState(false);
   const [page, setPage] = useState(1);
 
   const [data, setData] = useState<AdminReviewListResult | null>(null);
@@ -65,11 +67,19 @@ export default function ReviewsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await getReviews({ hidden: tab, q, page }));
+      setData(
+        await getReviews({
+          hidden: tab,
+          q,
+          page,
+          rating: ratingFilter,
+          hasMedia: mediaOnly ? "true" : undefined,
+        }),
+      );
     } finally {
       setLoading(false);
     }
-  }, [tab, q, page]);
+  }, [tab, q, page, ratingFilter, mediaOnly]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), q ? 400 : 0);
@@ -128,22 +138,65 @@ export default function ReviewsPage() {
               setPage(1);
             }}
           />
-          <div className="relative mb-5 max-w-sm">
-            <MagnifyingGlass
-              size={17}
-              className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-star/35"
-            />
-            <input
-              type="search"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
+          <div className="mb-5 flex flex-wrap items-center gap-3">
+            <div className="relative max-w-sm flex-1 basis-64">
+              <MagnifyingGlass
+                size={17}
+                className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-star/35"
+              />
+              <input
+                type="search"
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Tìm theo bình luận, người mua, sản phẩm, gian hàng, mã đơn…"
+                aria-label="Tìm đánh giá"
+                className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star outline-none transition-colors placeholder:text-star/35 focus:border-cosmic-violet/50"
+              />
+            </div>
+
+            {/* Lọc ĐÚNG số sao (không phải "từ N sao trở lên") — mỗi nút độc lập, chỉ 1 sao được bấm sáng để tránh hiểu nhầm thành lọc luỹ kế. */}
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.04] px-2 py-1">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => {
+                    setRatingFilter((prev) => (prev === n ? undefined : n));
+                    setPage(1);
+                  }}
+                  aria-label={`Lọc đúng ${n} sao`}
+                  aria-pressed={ratingFilter === n}
+                  className={`flex h-8 w-8 items-center justify-center gap-0.5 rounded-lg text-[12.5px] font-medium transition-colors ${
+                    ratingFilter === n
+                      ? "bg-amber-400/15 text-amber-300"
+                      : "text-star/45 hover:bg-white/5 hover:text-star/70"
+                  }`}
+                >
+                  {n}
+                  <Star size={11} weight={ratingFilter === n ? "fill" : "regular"} />
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMediaOnly((v) => !v);
                 setPage(1);
               }}
-              placeholder="Tìm theo nội dung đánh giá…"
-              aria-label="Tìm đánh giá"
-              className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star outline-none transition-colors placeholder:text-star/35 focus:border-cosmic-violet/50"
-            />
+              aria-pressed={mediaOnly}
+              className={`flex h-11 items-center gap-1.5 rounded-xl border px-3.5 text-[13px] font-medium transition-colors ${
+                mediaOnly
+                  ? "border-cosmic-violet/50 bg-cosmic-violet/10 text-star"
+                  : "border-white/10 bg-white/[0.04] text-star/60 hover:border-white/20"
+              }`}
+            >
+              <ImageIcon size={16} />
+              Chỉ có ảnh/video
+            </button>
           </div>
         </div>
 

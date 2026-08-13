@@ -161,7 +161,15 @@ export class AdminListReviewsDto {
   @IsIn(['all', 'hidden', 'visible'], { message: 'Bộ lọc không hợp lệ.' })
   hidden?: string;
 
-  /** Tìm theo nội dung đánh giá, tên người mua, tên sản phẩm hoặc gian hàng. */
+  /** `true` = chỉ đánh giá có ảnh/video — tiện khi cần xem bằng chứng vi phạm. */
+  @IsOptional()
+  @IsIn(['true', 'false'], { message: 'Bộ lọc không hợp lệ.' })
+  hasMedia?: string;
+
+  /**
+   * Tìm theo nội dung đánh giá, tên/email/SĐT người mua, tên sản phẩm, tên
+   * gian hàng, hoặc mã đơn hàng — xem `ReviewsService.adminList`.
+   */
   @IsOptional()
   @IsString()
   @MaxLength(200)

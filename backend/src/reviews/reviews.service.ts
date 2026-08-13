@@ -25,7 +25,7 @@ import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
-import type { UserDocument } from '../users/schemas/user.schema';
+import { User, type UserDocument } from '../users/schemas/user.schema';
 import { config } from '../config/config';
 
 function escapeRegex(s: string): string {
@@ -64,6 +64,8 @@ export class ReviewsService {
     private readonly profileModel: Model<ProfileDocument>,
     @InjectModel(Shop.name)
     private readonly shopModel: Model<ShopDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
   ) {}
@@ -392,6 +394,10 @@ export class ReviewsService {
    */
   async adminList(query: AdminListReviewsDto) {
     const filter: Record<string, unknown> = {};
+    // Gom các điều kiện $or riêng biệt (trạng thái ẩn, tìm kiếm) vào $and — hai
+    // khối $or SAO CHÉP ĐÈ LÊN NHAU nếu gán thẳng vào `filter.$or` hai lần.
+    const andConditions: Record<string, unknown>[] = [];
+
     if (query.shopId && Types.ObjectId.isValid(query.shopId)) {
       filter.shop = new Types.ObjectId(query.shopId);
     }
@@ -399,10 +405,11 @@ export class ReviewsService {
       filter.product = new Types.ObjectId(query.productId);
     }
     if (query.rating) filter.rating = query.rating;
+    if (query.hasMedia === 'true') filter.media = { $ne: [] };
     // "Đã ẩn" = review bị ẩn HOẶC reply bị ẩn — admin cần thấy cả hai loại
     // trong cùng hàng đợi kiểm duyệt, kẻo quên mất những review chỉ-ẩn-reply.
     if (query.hidden === 'hidden') {
-      filter.$or = [{ hidden: true }, { replyHidden: true }];
+      andConditions.push({ $or: [{ hidden: true }, { replyHidden: true }] });
     }
     if (query.hidden === 'visible') {
       filter.hidden = { $ne: true };
@@ -410,7 +417,44 @@ export class ReviewsService {
     }
 
     const term = query.q?.trim();
-    if (term) filter.comment = { $regex: escapeRegex(term), $options: 'i' };
+    if (term) {
+      // Tên người mua/sản phẩm/gian hàng và mã đơn không nằm trên chính bản
+      // ghi Review (chỉ tham chiếu ID) — dò ID khớp ở các collection liên quan
+      // TRƯỚC, rồi gộp lại thành một điều kiện $or duy nhất cùng với comment.
+      // Chấp nhận vài truy vấn phụ vì đây là công cụ quản trị, không phải API
+      // công khai tần suất cao.
+      const re = { $regex: escapeRegex(term), $options: 'i' };
+      const [matchProducts, matchShops, matchProfiles, matchUsers, matchOrders] =
+        await Promise.all([
+          this.productModel.find({ name: re }).select('_id').lean(),
+          this.shopModel.find({ name: re }).select('_id').lean(),
+          this.profileModel
+            .find({ $or: [{ fullName: re }, { displayName: re }] })
+            .select('user')
+            .lean(),
+          this.userModel.find({ $or: [{ email: re }, { phone: re }] }).select('_id').lean(),
+          this.orderModel.find({ orderCode: re }).select('_id').lean(),
+        ]);
+
+      const buyerIds = [
+        ...matchProfiles.map((p) => p.user),
+        ...matchUsers.map((u) => u._id),
+      ];
+      const searchOr: Record<string, unknown>[] = [{ comment: re }];
+      if (matchProducts.length) {
+        searchOr.push({ product: { $in: matchProducts.map((p) => p._id) } });
+      }
+      if (matchShops.length) {
+        searchOr.push({ shop: { $in: matchShops.map((s) => s._id) } });
+      }
+      if (buyerIds.length) searchOr.push({ buyer: { $in: buyerIds } });
+      if (matchOrders.length) {
+        searchOr.push({ order: { $in: matchOrders.map((o) => o._id) } });
+      }
+      andConditions.push({ $or: searchOr });
+    }
+
+    if (andConditions.length) filter.$and = andConditions;
 
     const page = Math.max(1, query.page ?? 1);
     const [items, total, allCount, hiddenCount] = await Promise.all([
