@@ -60,6 +60,8 @@ export const NOTIF_TYPES = [
   /** Admin ẩn/gỡ ẩn riêng phần phản hồi của shop — gửi cho SHOP (seller). */
   'review_reply_hidden',
   'review_reply_unhidden',
+  /** Admin kết thúc sớm khuyến mãi của shop (thường do nghi ngờ giá ảo) — xem `PromotionsService.adminEndDeal`. */
+  'promotion_ended_by_admin',
 ] as const;
 export type NotifType = (typeof NOTIF_TYPES)[number];
 

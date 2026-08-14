@@ -5,10 +5,18 @@ import {
   ModerationLog,
   ModerationLogSchema,
 } from './schemas/moderation-log.schema';
+import {
+  PriceHistory,
+  PriceHistorySchema,
+} from './schemas/price-history.schema';
 import { ProductsService } from './products.service';
 import { ProductModerationService } from './product-moderation.service';
+import { PriceHistoryService } from './price-history.service';
 import { PromotionsService } from './promotions.service';
-import { PromotionsController } from './promotions.controller';
+import {
+  AdminPromotionsController,
+  PromotionsController,
+} from './promotions.controller';
 import {
   AdminProductsController,
   ProductsController,
@@ -27,6 +35,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     MongooseModule.forFeature([
       { name: Product.name, schema: ProductSchema },
       { name: ModerationLog.name, schema: ModerationLogSchema },
+      { name: PriceHistory.name, schema: PriceHistorySchema },
     ]),
     ShopsModule, // để tra gian hàng của người bán + Shop model cho ProductModerationService
     CategoriesModule, // để kiểm tra danh mục + lấy đường dẫn tổ tiên
@@ -41,8 +50,14 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     ProductsController,
     AdminProductsController,
     PromotionsController,
+    AdminPromotionsController,
   ],
-  providers: [ProductsService, ProductModerationService, PromotionsService],
+  providers: [
+    ProductsService,
+    ProductModerationService,
+    PriceHistoryService,
+    PromotionsService,
+  ],
   // OrdersModule dùng ProductsService để giữ/hoàn kho khi tạo & huỷ đơn.
   exports: [MongooseModule, ProductsService, PromotionsService],
 })

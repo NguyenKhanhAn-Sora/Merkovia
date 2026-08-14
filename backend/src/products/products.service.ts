@@ -25,6 +25,7 @@ import { buildSearchText, shortId, slugify } from '../common/text';
 import { EmbeddingService } from '../search/embedding.service';
 import { buildEmbedText } from '../search/embed-text';
 import { ProductModerationService } from './product-moderation.service';
+import { PriceHistoryService } from './price-history.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -60,6 +61,7 @@ export class ProductsService {
     private readonly media: MediaService,
     private readonly embedding: EmbeddingService,
     private readonly moderation: ProductModerationService,
+    private readonly priceHistory: PriceHistoryService,
   ) {}
 
   private readonly logger = new Logger(ProductsService.name);
@@ -295,6 +297,9 @@ export class ProductsService {
       true,
     );
     await product.save();
+    // Mốc giá ĐẦU TIÊN của sản phẩm — nền để sau này phát hiện tăng giá bất
+    // thường ngay trước khi đặt khuyến mãi (xem `PriceHistoryService`).
+    await this.priceHistory.record(product._id, product.priceMin);
     this.scheduleEmbedding(product, category.name);
     if (shouldQueueReview) this.moderation.queueReview(product._id);
     return { ok: true, id: String(product._id) };
@@ -504,12 +509,17 @@ export class ProductsService {
       contentChanged,
     );
 
+    const priceMinBefore = product.priceMin;
     this.syncDerived(product);
     // So chuỗi tìm kiếm trước/sau: chỉ khi phần CHỮ đổi mới cần nhúng lại vector
     // (đổi giá/kho/ảnh không ảnh hưởng ngữ nghĩa nên khỏi tốn lượt gọi Gemini).
     const prevSearch = product.searchText;
     this.syncSearchText(product, categoryName);
     await product.save();
+    // Chỉ ghi khi giá THỰC SỰ đổi — sửa ảnh/tên/kho không tạo mốc giá mới.
+    if (product.priceMin !== priceMinBefore) {
+      await this.priceHistory.record(product._id, product.priceMin);
+    }
     if (product.searchText !== prevSearch) {
       this.scheduleEmbedding(product, categoryName);
     }

@@ -30,3 +30,13 @@ export class ListDealsDto {
   })
   tab?: string;
 }
+
+/** Trang "Khuyến mãi" của Kênh Quản trị — xem khuyến mãi toàn sàn. */
+export class AdminListPromotionsDto {
+  /** `flagged` = chỉ khuyến mãi bị nghi ngờ giá ảo. */
+  @IsOptional()
+  @IsIn(['all', 'live', 'scheduled', 'flagged'], {
+    message: 'Bộ lọc không hợp lệ.',
+  })
+  tab?: string;
+}

@@ -6,14 +6,21 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Post,
   Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { PromotionsService } from './promotions.service';
-import { ListDealsDto, SetDealDto } from './dto/promotion.dto';
+import {
+  AdminListPromotionsDto,
+  ListDealsDto,
+  SetDealDto,
+} from './dto/promotion.dto';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminAuthGuard, CurrentAdmin } from '../admin-auth/admin-auth.guard';
+import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /** Khuyến mãi của gian hàng — chỉ người bán dùng. */
@@ -53,5 +60,26 @@ export class PromotionsController {
     @Param('productId') productId: string,
   ) {
     return this.promotions.endDeal(user, productId);
+  }
+}
+
+/** Trang "Khuyến mãi" của Kênh Quản trị — xem & kết thúc khuyến mãi toàn sàn. */
+@Controller('admin/promotions')
+@UseGuards(AdminAuthGuard)
+export class AdminPromotionsController {
+  constructor(private readonly promotions: PromotionsService) {}
+
+  @Get()
+  list(@Query() query: AdminListPromotionsDto) {
+    return this.promotions.adminList(query);
+  }
+
+  @Post(':productId/end')
+  @HttpCode(HttpStatus.OK)
+  end(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Param('productId') productId: string,
+  ) {
+    return this.promotions.adminEndDeal(admin, productId);
   }
 }

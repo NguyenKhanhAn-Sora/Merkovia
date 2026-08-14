@@ -10,9 +10,24 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Product, ProductDocument } from './schemas/product.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
-import { ListDealsDto, SetDealDto } from './dto/promotion.dto';
+import {
+  AdminListPromotionsDto,
+  ListDealsDto,
+  SetDealDto,
+} from './dto/promotion.dto';
 import { isDealLive, isDealScheduled } from './deal';
+import { PriceHistoryService } from './price-history.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import type { UserDocument } from '../users/schemas/user.schema';
+
+/**
+ * Giá gốc cao hơn giá tham chiếu (xem `PriceHistoryService`) từ mức này trở
+ * lên mới đáng nghi — chênh lệch nhỏ (làm tròn, phí ship gộp giá...) là bình
+ * thường, không phải dấu hiệu dựng giá ảo.
+ */
+const HIKE_FLAG_THRESHOLD_PERCENT = 10;
 
 /** Khuyến mãi ngắn hơn mức này thì người mua chưa kịp thấy đã hết. */
 const MIN_DURATION_MINUTES = 15;
@@ -36,6 +51,9 @@ export class PromotionsService {
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
+    private readonly priceHistory: PriceHistoryService,
+    private readonly notifications: NotificationsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private async requireShop(user: UserDocument): Promise<ShopDocument> {
@@ -135,7 +153,28 @@ export class PromotionsService {
       );
     }
 
-    product.activeDeal = { price: dto.price, startsAt, endsAt };
+    // Nghi ngờ giá ảo: `priceMin` (giá gốc dùng để tính % giảm) vừa bị tăng
+    // ngay trước khi đặt sale này. KHÔNG chặn — chỉ đánh dấu để admin xét,
+    // tránh cản oan các đợt sale thật (xem PriceHistoryService để biết lý do
+    // "không đủ dữ liệu" luôn được xử lý an toàn về phía không nghi ngờ).
+    const hike = await this.priceHistory.findPreHikeReference(product._id);
+    let flagged = false;
+    let flagReason: string | undefined;
+    if (
+      hike &&
+      product.priceMin > hike.referenceLow * (1 + HIKE_FLAG_THRESHOLD_PERCENT / 100)
+    ) {
+      flagged = true;
+      const hoursAgo = Math.max(
+        1,
+        Math.round((now - hike.latestChangeAt.getTime()) / 3_600_000),
+      );
+      flagReason =
+        `Giá gốc vừa tăng từ ${hike.referenceLow.toLocaleString('vi-VN')}đ lên ` +
+        `${product.priceMin.toLocaleString('vi-VN')}đ khoảng ${hoursAgo} giờ trước khi đặt khuyến mãi này.`;
+    }
+
+    product.activeDeal = { price: dto.price, startsAt, endsAt, flagged, flagReason };
     await product.save();
 
     return { product: this.publicDeal(product) };
@@ -238,6 +277,139 @@ export class PromotionsService {
     } catch (err: unknown) {
       this.logger.warn(`Dọn khuyến mãi hết hạn thất bại: ${String(err)}`);
     }
+  }
+
+  /* -------------------------------- Admin --------------------------------- */
+
+  /**
+   * Toàn bộ khuyến mãi trên sàn (mọi shop) cho trang kiểm duyệt của admin —
+   * khác `list()` (chỉ khuyến mãi của MỘT shop), có thêm tên gian hàng và cờ
+   * nghi ngờ giá ảo.
+   */
+  async adminList(query: AdminListPromotionsDto) {
+    const products = await this.productModel
+      .find({ activeDeal: { $ne: null } })
+      .select(
+        'name slug images variants shop priceMin priceMax totalStock status activeDeal',
+      )
+      .sort({ 'activeDeal.endsAt': 1 })
+      .limit(300)
+      .populate<{ shop: { _id: Types.ObjectId; name: string } }>('shop', 'name')
+      .lean();
+
+    const all = products.map((p) => this.adminShapeDeal(p));
+    const counts = {
+      live: all.filter((p) => p.state === 'live').length,
+      scheduled: all.filter((p) => p.state === 'scheduled').length,
+      flagged: all.filter((p) => p.flagged).length,
+    };
+
+    const tab = query.tab ?? 'all';
+    const items =
+      tab === 'all'
+        ? all
+        : tab === 'flagged'
+          ? all.filter((p) => p.flagged)
+          : all.filter((p) => p.state === tab);
+
+    return { items, counts: { ...counts, all: all.length } };
+  }
+
+  /**
+   * Admin kết thúc khuyến mãi ngay lập tức — cùng cơ chế `endDeal()` (xoá hẳn
+   * `activeDeal`, không lùi `endsAt`), khác ở chỗ không giới hạn theo shop sở
+   * hữu và có báo shop + ghi nhật ký. Đơn đã bán trong lúc khuyến mãi còn hiệu
+   * lực giữ nguyên giá đã chốt lúc mua (snapshot trên `Order`), không bị ảnh
+   * hưởng ngược.
+   */
+  async adminEndDeal(admin: AdminPrincipal, productId: string) {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new NotFoundException('Không tìm thấy sản phẩm.');
+    }
+    const product = await this.productModel.findById(productId);
+    if (!product) throw new NotFoundException('Không tìm thấy sản phẩm.');
+    if (!product.activeDeal) {
+      throw new BadRequestException('Sản phẩm này không có khuyến mãi nào.');
+    }
+
+    const deal = product.activeDeal;
+    product.activeDeal = undefined;
+    await product.save();
+
+    await this.notifications.notifyShop(product.shop, {
+      type: 'promotion_ended_by_admin',
+      title: 'Khuyến mãi của bạn đã bị admin kết thúc',
+      body:
+        `Khuyến mãi cho sản phẩm "${product.name}" (giá ${deal.price.toLocaleString('vi-VN')}đ) ` +
+        `đã bị quản trị viên kết thúc sớm` +
+        (deal.flagged
+          ? ' do nghi ngờ giá gốc bị đẩy lên trước khi giảm giá.'
+          : '.'),
+      link: '/promotions',
+    });
+
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: 'Kết thúc khuyến mãi',
+      targetLabel: product.name,
+      detail: deal.flagged ? `Nghi ngờ giá ảo: ${deal.flagReason}` : undefined,
+    });
+
+    return { ok: true };
+  }
+
+  private adminShapeDeal(p: {
+    _id: Types.ObjectId;
+    name: string;
+    slug?: string;
+    images: { url: string }[];
+    variants: { image?: string }[];
+    shop: { _id: Types.ObjectId; name: string };
+    priceMin: number;
+    priceMax: number;
+    totalStock: number;
+    status: string;
+    activeDeal?: {
+      price: number;
+      startsAt?: Date;
+      endsAt: Date;
+      flagged?: boolean;
+      flagReason?: string;
+    };
+  }) {
+    const deal = p.activeDeal;
+    const state = !deal
+      ? 'ended'
+      : isDealLive(deal)
+        ? 'live'
+        : isDealScheduled(deal)
+          ? 'scheduled'
+          : 'ended';
+
+    return {
+      productId: String(p._id),
+      name: p.name,
+      slug: p.slug,
+      image: p.images?.[0]?.url ?? p.variants?.find((v) => v.image)?.image,
+      shop: { id: String(p.shop._id), name: p.shop.name },
+      priceMin: p.priceMin,
+      priceMax: p.priceMax,
+      totalStock: p.totalStock,
+      status: p.status,
+      state,
+      flagged: !!deal?.flagged,
+      flagReason: deal?.flagReason,
+      deal: deal
+        ? {
+            price: deal.price,
+            startsAt: deal.startsAt,
+            endsAt: deal.endsAt,
+            discountPercent: Math.round(
+              ((p.priceMin - deal.price) / p.priceMin) * 100,
+            ),
+          }
+        : undefined,
+    };
   }
 
   /* ------------------------------ Hiển thị ------------------------------- */

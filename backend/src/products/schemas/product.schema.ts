@@ -156,6 +156,18 @@ export class ActiveDeal {
 
   @Prop({ type: Types.ObjectId, ref: 'Promotion' })
   promotion?: Types.ObjectId;
+
+  /**
+   * Tự động đánh dấu lúc ĐẶT khuyến mãi (không tính lại sau đó — "chốt" giống
+   * mọi snapshot khác trong hệ thống): `priceMin` dùng làm giá gốc vừa mới bị
+   * tăng ngay trước đó, nghi ngờ dựng giá ảo để tạo cảm giác giảm giá hời.
+   * Xem `PriceHistoryService.findPreHikeReference` + `PromotionsService.setDeal`.
+   */
+  @Prop({ default: false })
+  flagged: boolean;
+
+  @Prop({ trim: true, maxlength: 300 })
+  flagReason?: string;
 }
 const ActiveDealSchema = SchemaFactory.createForClass(ActiveDeal);
 
