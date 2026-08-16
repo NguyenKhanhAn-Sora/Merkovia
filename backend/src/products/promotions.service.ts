@@ -298,19 +298,30 @@ export class PromotionsService {
       .lean();
 
     const all = products.map((p) => this.adminShapeDeal(p));
+    // Số đếm trên tab luôn phản ánh TOÀN BỘ khuyến mãi — không đổi theo ô tìm
+    // kiếm, để admin biết chính xác quy mô mỗi mục dù đang lọc theo từ khoá gì.
     const counts = {
       live: all.filter((p) => p.state === 'live').length,
       scheduled: all.filter((p) => p.state === 'scheduled').length,
       flagged: all.filter((p) => p.flagged).length,
     };
 
+    const term = query.q?.trim().toLowerCase();
+    const searched = term
+      ? all.filter(
+          (p) =>
+            p.name.toLowerCase().includes(term) ||
+            p.shop.name.toLowerCase().includes(term),
+        )
+      : all;
+
     const tab = query.tab ?? 'all';
     const items =
       tab === 'all'
-        ? all
+        ? searched
         : tab === 'flagged'
-          ? all.filter((p) => p.flagged)
-          : all.filter((p) => p.state === tab);
+          ? searched.filter((p) => p.flagged)
+          : searched.filter((p) => p.state === tab);
 
     return { items, counts: { ...counts, all: all.length } };
   }

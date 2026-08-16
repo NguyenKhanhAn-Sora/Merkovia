@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle,
   CircleNotch,
   ClockCounterClockwise,
+  MagnifyingGlass,
   Prohibit,
   ShieldCheck,
   XCircle,
@@ -22,21 +23,21 @@ function iconFor(action: string): Icon {
 }
 
 export default function AuditLogPage() {
+  const [q, setQ] = useState("");
   const [items, setItems] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    const r = await getAuditLog(1, 100, q);
+    setItems(r.items);
+    setLoading(false);
+  }, [q]);
+
   useEffect(() => {
-    let cancelled = false;
-    getAuditLog(1, 100).then((r) => {
-      if (!cancelled) {
-        setItems(r.items);
-        setLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    const t = setTimeout(() => void load(), q ? 400 : 0);
+    return () => clearTimeout(t);
+  }, [load, q]);
 
   const days = groupByDay(items);
 
@@ -47,6 +48,21 @@ export default function AuditLogPage() {
         description="Lịch sử thao tác của tài khoản quản trị — phục vụ truy vết khi cần."
       />
 
+      <div className="relative mb-6 max-w-sm">
+        <MagnifyingGlass
+          size={17}
+          className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-star/35"
+        />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Tìm theo admin, hành động, đối tượng, chi tiết…"
+          aria-label="Tìm trong nhật ký"
+          className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star outline-none transition-colors placeholder:text-star/35 focus:border-cosmic-violet/50"
+        />
+      </div>
+
       {loading ? (
         <div className="flex justify-center py-16">
           <CircleNotch size={22} className="animate-spin text-star/40" />
@@ -54,7 +70,7 @@ export default function AuditLogPage() {
       ) : days.length === 0 ? (
         <Panel>
           <p className="py-6 text-center text-[13.5px] text-star/45">
-            Chưa có hoạt động nào được ghi nhận.
+            {q ? "Không tìm thấy hoạt động nào khớp." : "Chưa có hoạt động nào được ghi nhận."}
           </p>
         </Panel>
       ) : (

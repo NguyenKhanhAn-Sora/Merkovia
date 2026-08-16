@@ -19,9 +19,11 @@ export interface AuditLogResult {
 
 const EMPTY: AuditLogResult = { items: [], total: 0, page: 1, limit: 50 };
 
-export async function getAuditLog(page = 1, limit = 50): Promise<AuditLogResult> {
+export async function getAuditLog(page = 1, limit = 50, q?: string): Promise<AuditLogResult> {
   try {
-    const res = await apiFetch(`/admin/audit-log?page=${page}&limit=${limit}`);
+    const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (q) qs.set("q", q);
+    const res = await apiFetch(`/admin/audit-log?${qs}`);
     if (!res.ok) return EMPTY;
     return (await res.json()) as AuditLogResult;
   } catch {

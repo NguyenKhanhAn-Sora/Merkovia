@@ -90,3 +90,11 @@ export class ResolveShopReportDto {
   @Max(365, { message: 'Đình chỉ tối đa 365 ngày.' })
   suspendDays?: number;
 }
+
+/** Hàng đợi ưu tiên hoặc lịch sử xử lý — lọc theo tên gian hàng. */
+export class SearchShopReportsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  q?: string;
+}

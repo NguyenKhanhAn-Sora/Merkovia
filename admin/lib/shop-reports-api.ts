@@ -144,13 +144,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export function getReportQueue(): Promise<ReportQueueItem[]> {
-  return request("/admin/shop-reports");
+export function getReportQueue(q?: string): Promise<ReportQueueItem[]> {
+  const qs = q ? `?q=${encodeURIComponent(q)}` : "";
+  return request(`/admin/shop-reports${qs}`);
 }
 
 /** Lịch sử xử lý — kể cả shop đã hết báo cáo đang chờ (lối vào để gỡ đình chỉ vô thời hạn). */
-export function getReportHistory(): Promise<ReportHistoryItem[]> {
-  return request("/admin/shop-reports/history");
+export function getReportHistory(q?: string): Promise<ReportHistoryItem[]> {
+  const qs = q ? `?q=${encodeURIComponent(q)}` : "";
+  return request(`/admin/shop-reports/history${qs}`);
 }
 
 export function getShopReports(shopId: string): Promise<ShopReportsDetail> {

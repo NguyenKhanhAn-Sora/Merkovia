@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CircleNotch, Eye, Package, Warning, XCircle } from "@phosphor-icons/react";
+import { CircleNotch, Eye, MagnifyingGlass, Package, Warning, XCircle } from "@phosphor-icons/react";
 import {
   Badge,
   DataTable,
@@ -62,6 +62,7 @@ function IconActionButton({
 
 export default function PromotionsPage() {
   const [tab, setTab] = useState<PromotionTab>("all");
+  const [q, setQ] = useState("");
   const [data, setData] = useState<AdminPromotionListResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -75,17 +76,18 @@ export default function PromotionsPage() {
     setLoading(true);
     setError("");
     try {
-      setData(await getPromotions(tab));
+      setData(await getPromotions(tab, q));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không tải được danh sách.");
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, [tab, q]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const t = setTimeout(() => void load(), q ? 400 : 0);
+    return () => clearTimeout(t);
+  }, [load, q]);
 
   const c = data?.counts;
   const tabs: { key: PromotionTab; label: string; count?: number }[] = [
@@ -141,6 +143,20 @@ export default function PromotionsPage() {
       <Panel padded={false} className="overflow-hidden">
         <div className="px-5 pt-5 sm:px-6 sm:pt-6">
           <TabBar tabs={tabs} value={tab} onChange={(k) => setTab(k as PromotionTab)} />
+          <div className="relative mb-5 max-w-sm">
+            <MagnifyingGlass
+              size={17}
+              className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-star/35"
+            />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Tìm theo tên sản phẩm, tên gian hàng…"
+              aria-label="Tìm khuyến mãi"
+              className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star outline-none transition-colors placeholder:text-star/35 focus:border-cosmic-violet/50"
+            />
+          </div>
         </div>
 
         {loading ? (

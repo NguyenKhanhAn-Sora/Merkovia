@@ -10,6 +10,6 @@ export class AuditLogController {
 
   @Get()
   list(@Query() query: QueryAuditLogDto) {
-    return this.auditLog.list(query.page, query.limit);
+    return this.auditLog.list(query.page, query.limit, query.q);
   }
 }

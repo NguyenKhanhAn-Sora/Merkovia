@@ -10,6 +10,10 @@ export interface AuditLogEntry {
   detail?: string;
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Ghi/đọc nhật ký thao tác admin. Các service nghiệp vụ (shop-reports, orders,
  * products...) gọi `log()` ngay sau khi hành động ĐÃ thành công.
@@ -34,15 +38,30 @@ export class AuditLogService {
     }
   }
 
-  async list(page = 1, limit = 50) {
+  async list(page = 1, limit = 50, q?: string) {
+    const term = q?.trim();
+    // Tìm 1 ô duy nhất quét cả 4 trường — admin thường chỉ nhớ MỘT trong số
+    // "ai làm", "làm gì", "trên cái gì", hoặc "chi tiết ra sao", không chắc
+    // trường nào, nên gộp $or thay vì bắt chọn đúng trường trước.
+    const filter = term
+      ? {
+          $or: [
+            { adminEmail: { $regex: escapeRegex(term), $options: 'i' } },
+            { action: { $regex: escapeRegex(term), $options: 'i' } },
+            { targetLabel: { $regex: escapeRegex(term), $options: 'i' } },
+            { detail: { $regex: escapeRegex(term), $options: 'i' } },
+          ],
+        }
+      : {};
+
     const [items, total] = await Promise.all([
       this.model
-        .find()
+        .find(filter)
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
-      this.model.countDocuments(),
+      this.model.countDocuments(filter),
     ]);
     return {
       items: items.map((l) => ({

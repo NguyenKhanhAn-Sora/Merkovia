@@ -84,8 +84,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export function getPromotions(tab: PromotionTab): Promise<AdminPromotionListResult> {
-  return request(`/admin/promotions?tab=${tab}`);
+export function getPromotions(tab: PromotionTab, q?: string): Promise<AdminPromotionListResult> {
+  const qs = new URLSearchParams({ tab });
+  if (q) qs.set("q", q);
+  return request(`/admin/promotions?${qs}`);
 }
 
 export function getPromotionDetail(productId: string): Promise<AdminPromotionDetail> {

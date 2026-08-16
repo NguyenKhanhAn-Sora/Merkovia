@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsIn, IsInt, IsOptional, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 /** Đặt hoặc cập nhật khuyến mãi cho một sản phẩm. */
 export class SetDealDto {
@@ -39,4 +47,10 @@ export class AdminListPromotionsDto {
     message: 'Bộ lọc không hợp lệ.',
   })
   tab?: string;
+
+  /** Tìm theo tên sản phẩm hoặc tên gian hàng. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  q?: string;
 }

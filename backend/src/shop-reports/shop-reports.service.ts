@@ -32,6 +32,20 @@ import { config } from '../config/config';
 
 const QUEUE_SCAN_LIMIT = 1000;
 
+/**
+ * Lọc theo tên gian hàng — cả hàng đợi lẫn lịch sử đều đã gộp xong TOÀN BỘ
+ * (không phân trang từ DB), nên lọc ngay trên mảng kết quả cuối là đủ, không
+ * cần đẩy xuống tầng truy vấn.
+ */
+function filterByShopName<T extends { shopName: string }>(
+  items: T[],
+  q?: string,
+): T[] {
+  const term = q?.trim().toLowerCase();
+  if (!term) return items;
+  return items.filter((it) => it.shopName.toLowerCase().includes(term));
+}
+
 /** Một dòng trong hàng đợi ưu tiên xử lý — gộp mọi báo cáo `pending` của một shop. */
 export interface ReportQueueItem {
   shopId: string;
@@ -255,7 +269,7 @@ export class ShopReportsService {
    * cùng lúc từ 1 người, đây là lớp phòng vệ THỨ HAI ở tầng tính điểm, không
    * phụ thuộc hoàn toàn vào ràng buộc lúc ghi.
    */
-  async priorityQueue(): Promise<ReportQueueItem[]> {
+  async priorityQueue(q?: string): Promise<ReportQueueItem[]> {
     const reports = await this.reportModel
       .find({ status: 'pending' })
       .sort({ createdAt: 1 })
@@ -340,7 +354,7 @@ export class ShopReportsService {
       if (b.score !== a.score) return b.score - a.score;
       return a.oldestReportAt.getTime() - b.oldestReportAt.getTime();
     });
-    return items;
+    return filterByShopName(items, q);
   }
 
   /**
@@ -353,7 +367,7 @@ export class ShopReportsService {
    * không còn cách nào gỡ đình chỉ nếu thiếu trang này — admin cần tìm lại nó
    * ở đây để mở khay chi tiết (có sẵn nút "Gỡ đình chỉ ngay").
    */
-  async resolvedHistory(): Promise<ReportHistoryItem[]> {
+  async resolvedHistory(q?: string): Promise<ReportHistoryItem[]> {
     const reports = await this.reportModel
       .find({ status: { $in: ['resolved', 'dismissed'] } })
       .sort({ 'resolution.resolvedAt': -1 })
@@ -394,7 +408,7 @@ export class ShopReportsService {
       totalCounts.map((c) => [String(c._id), c.count]),
     );
 
-    return shopIds
+    const items = shopIds
       .filter((id) => shopById.has(id))
       .map((shopId) => {
         const shop = shopById.get(shopId)!;
@@ -414,6 +428,7 @@ export class ShopReportsService {
         return item;
       })
       .sort((a, b) => b.lastActionAt.getTime() - a.lastActionAt.getTime());
+    return filterByShopName(items, q);
   }
 
   /**

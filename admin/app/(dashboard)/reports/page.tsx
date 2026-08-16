@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { CircleNotch, Eye, Flag } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CircleNotch, Eye, Flag, MagnifyingGlass } from "@phosphor-icons/react";
 import {
   getReportQueue,
   getReportHistory,
@@ -70,6 +70,7 @@ function timeAgo(iso: string): string {
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<"queue" | "history" | "disputes">("queue");
+  const [q, setQ] = useState("");
 
   const [items, setItems] = useState<ReportQueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
@@ -86,9 +87,12 @@ export default function ReportsPage() {
   const [openShopId, setOpenShopId] = useState<string | null>(null);
   const [openDispute, setOpenDispute] = useState<OrderDisputeItem | null>(null);
 
-  const loadQueue = useCallback(() => {
+  // Hàng đợi/lịch sử lọc thẳng ở server theo tên gian hàng (query `q`) — mỗi
+  // shop mỗi dòng nên bộ nhớ nhỏ, nhưng vẫn nhất quán với cách các trang khác
+  // trong phiên này đã làm (Khuyến mãi, Nhật ký hoạt động).
+  const loadQueue = useCallback((term: string) => {
     setQueueLoading(true);
-    getReportQueue()
+    getReportQueue(term)
       .then(setItems)
       .catch((e: unknown) =>
         setQueueError(e instanceof Error ? e.message : "Không tải được hàng đợi báo cáo."),
@@ -96,9 +100,9 @@ export default function ReportsPage() {
       .finally(() => setQueueLoading(false));
   }, []);
 
-  const loadHistory = useCallback(() => {
+  const loadHistory = useCallback((term: string) => {
     setHistoryLoading(true);
-    getReportHistory()
+    getReportHistory(term)
       .then(setHistory)
       .catch((e: unknown) =>
         setHistoryError(e instanceof Error ? e.message : "Không tải được lịch sử xử lý."),
@@ -116,15 +120,45 @@ export default function ReportsPage() {
       .finally(() => setDisputesLoading(false));
   }, []);
 
+  // Dùng sau khi resolve/unsuspend một shop — phải nạp lại ĐÚNG từ khoá đang
+  // gõ (không phải rỗng), nếu không sẽ có bug đóng gói cũ: sửa xong một shop
+  // đang lọc theo tên rồi danh sách bỗng nạp lại KHÔNG lọc.
   const loadAll = useCallback(() => {
-    loadQueue();
-    loadHistory();
+    loadQueue(q);
+    loadHistory(q);
     loadDisputes();
-  }, [loadQueue, loadHistory, loadDisputes]);
+  }, [loadQueue, loadHistory, loadDisputes, q]);
 
+  // Nạp danh sách tranh chấp một lần khi vào trang — tab đó không gọi lại
+  // API theo từ khoá, lọc ngay trên dữ liệu đã có (xem `filteredDisputes`).
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    loadDisputes();
+  }, [loadDisputes]);
+
+  // Hàng đợi/lịch sử nạp lại theo `q`, có debounce khi đang gõ.
+  useEffect(() => {
+    const t = setTimeout(
+      () => {
+        loadQueue(q);
+        loadHistory(q);
+      },
+      q ? 400 : 0,
+    );
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  /** Tranh chấp không có API tìm kiếm riêng — lọc ngay trên danh sách đã tải. */
+  const filteredDisputes = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return disputes;
+    return disputes.filter(
+      (d) =>
+        d.orderCode.toLowerCase().includes(term) ||
+        d.shopName.toLowerCase().includes(term) ||
+        d.buyerContact.toLowerCase().includes(term),
+    );
+  }, [disputes, q]);
 
   return (
     <div>
@@ -139,11 +173,29 @@ export default function ReportsPage() {
             tabs={[
               { key: "queue", label: "Đang chờ xử lý", count: items.length },
               { key: "history", label: "Lịch sử xử lý", count: history.length },
-              { key: "disputes", label: "Tranh chấp đơn hàng", count: disputes.length },
+              { key: "disputes", label: "Tranh chấp đơn hàng", count: filteredDisputes.length },
             ]}
             value={tab}
             onChange={(k) => setTab(k as "queue" | "history" | "disputes")}
           />
+          <div className="relative mb-5 max-w-sm">
+            <MagnifyingGlass
+              size={17}
+              className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-star/35"
+            />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={
+                tab === "disputes"
+                  ? "Tìm theo mã đơn, gian hàng, người mua…"
+                  : "Tìm theo tên gian hàng…"
+              }
+              aria-label="Tìm báo cáo"
+              className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-10 pr-3 text-[13.5px] text-star outline-none transition-colors placeholder:text-star/35 focus:border-cosmic-violet/50"
+            />
+          </div>
         </div>
 
         {tab === "queue" &&
@@ -156,8 +208,12 @@ export default function ReportsPage() {
           ) : items.length === 0 ? (
             <EmptyState
               icon={Flag}
-              title="Không có báo cáo nào đang chờ"
-              description="Mọi báo cáo vi phạm gian hàng đã được xử lý."
+              title={q ? "Không tìm thấy gian hàng nào khớp" : "Không có báo cáo nào đang chờ"}
+              description={
+                q
+                  ? "Thử một tên gian hàng khác."
+                  : "Mọi báo cáo vi phạm gian hàng đã được xử lý."
+              }
             />
           ) : (
             <DataTable
@@ -203,8 +259,12 @@ export default function ReportsPage() {
           ) : history.length === 0 ? (
             <EmptyState
               icon={Flag}
-              title="Chưa có báo cáo nào được xử lý"
-              description="Lịch sử quyết định (cảnh cáo, đình chỉ, bỏ qua) sẽ hiện ở đây."
+              title={q ? "Không tìm thấy gian hàng nào khớp" : "Chưa có báo cáo nào được xử lý"}
+              description={
+                q
+                  ? "Thử một tên gian hàng khác."
+                  : "Lịch sử quyết định (cảnh cáo, đình chỉ, bỏ qua) sẽ hiện ở đây."
+              }
             />
           ) : (
             <DataTable
@@ -254,17 +314,21 @@ export default function ReportsPage() {
             </div>
           ) : disputesError ? (
             <p className="px-6 py-10 text-center text-[13.5px] text-rose-300">{disputesError}</p>
-          ) : disputes.length === 0 ? (
+          ) : filteredDisputes.length === 0 ? (
             <EmptyState
               icon={Flag}
-              title="Không có tranh chấp nào cần xử lý"
-              description="Yêu cầu huỷ/trả hàng của gian hàng đang bị đình chỉ sẽ hiện ở đây — shop bị đình chỉ không được tự duyệt."
+              title={q ? "Không tìm thấy tranh chấp nào khớp" : "Không có tranh chấp nào cần xử lý"}
+              description={
+                q
+                  ? "Thử một từ khoá khác — mã đơn, tên gian hàng, hoặc thông tin người mua."
+                  : "Yêu cầu huỷ/trả hàng của gian hàng đang bị đình chỉ sẽ hiện ở đây — shop bị đình chỉ không được tự duyệt."
+              }
             />
           ) : (
             <DataTable
               columns={["Đơn hàng", "Gian hàng", "Loại", "Lý do", "Người mua", "Số tiền", "Yêu cầu lúc", ""]}
             >
-              {disputes.map((d) => (
+              {filteredDisputes.map((d) => (
                 <tr key={`${d.type}-${d.orderId}`}>
                   <Td className="font-medium text-star/85">{d.orderCode}</Td>
                   <Td className="text-star/70">{d.shopName}</Td>

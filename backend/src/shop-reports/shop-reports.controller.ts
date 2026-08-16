@@ -1,9 +1,18 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ShopReportsService } from './shop-reports.service';
 import {
   CreateShopReportDto,
   ResolveShopReportDto,
+  SearchShopReportsDto,
 } from './dto/shop-report.dto';
 import { CurrentUser, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminAuthGuard, CurrentAdmin } from '../admin-auth/admin-auth.guard';
@@ -31,14 +40,14 @@ export class AdminShopReportsController {
 
   /** Hàng đợi ưu tiên — gộp theo shop, sắp theo mức độ khẩn cấp. */
   @Get()
-  queue() {
-    return this.shopReports.priorityQueue();
+  queue(@Query() query: SearchShopReportsDto) {
+    return this.shopReports.priorityQueue(query.q);
   }
 
   /** Lịch sử xử lý — shop đã có quyết định (kể cả đã hết báo cáo đang chờ). */
   @Get('history')
-  history() {
-    return this.shopReports.resolvedHistory();
+  history(@Query() query: SearchShopReportsDto) {
+    return this.shopReports.resolvedHistory(query.q);
   }
 
   @Get('shop/:shopId')
