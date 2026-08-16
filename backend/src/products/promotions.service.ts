@@ -316,6 +316,88 @@ export class PromotionsService {
   }
 
   /**
+   * Chi tiết một khuyến mãi cho admin — đủ thông tin sản phẩm + gian hàng để
+   * xét đoán nhanh mà không phải mở nhiều tab (số liệu bán/đánh giá của sản
+   * phẩm, tiền án đình chỉ của shop...), không cần thêm truy vấn chéo module
+   * nào (toàn bộ đã có sẵn trên chính `Product`/`Shop`).
+   */
+  async adminGetDealDetail(productId: string) {
+    if (!Types.ObjectId.isValid(productId)) {
+      throw new NotFoundException('Không tìm thấy sản phẩm.');
+    }
+    const product = await this.productModel
+      .findById(productId)
+      .populate<{
+        shop: {
+          _id: Types.ObjectId;
+          name: string;
+          logoUrl?: string;
+          status: string;
+          suspendedUntil?: Date | null;
+          businessType: string;
+          description?: string;
+          contactName: string;
+          contactPhone: string;
+          contactEmail?: string;
+        };
+      }>(
+        'shop',
+        'name logoUrl status suspendedUntil businessType description contactName contactPhone contactEmail',
+      )
+      .lean();
+    if (!product) throw new NotFoundException('Không tìm thấy sản phẩm.');
+    if (!product.activeDeal) {
+      throw new BadRequestException('Sản phẩm này không có khuyến mãi nào.');
+    }
+
+    const deal = product.activeDeal;
+    const state = isDealLive(deal) ? 'live' : isDealScheduled(deal) ? 'scheduled' : 'ended';
+
+    return {
+      product: {
+        id: String(product._id),
+        name: product.name,
+        description: product.description,
+        images: product.images?.map((i) => i.url) ?? [],
+        priceMin: product.priceMin,
+        priceMax: product.priceMax,
+        totalStock: product.totalStock,
+        status: product.status,
+        moderationState: product.moderation?.state,
+        stats: {
+          sold: product.stats?.sold ?? 0,
+          views: product.stats?.views ?? 0,
+          favorites: product.stats?.favorites ?? 0,
+          ratingAvg: product.stats?.ratingAvg ?? 0,
+          ratingCount: product.stats?.ratingCount ?? 0,
+        },
+        createdAt: (product as unknown as { createdAt?: Date }).createdAt,
+      },
+      shop: {
+        id: String(product.shop._id),
+        name: product.shop.name,
+        logoUrl: product.shop.logoUrl,
+        status: product.shop.status,
+        suspendedUntil: product.shop.suspendedUntil,
+        businessType: product.shop.businessType,
+        description: product.shop.description,
+        contactName: product.shop.contactName,
+        contactPhone: product.shop.contactPhone,
+        contactEmail: product.shop.contactEmail,
+      },
+      deal: {
+        price: deal.price,
+        startsAt: deal.startsAt,
+        endsAt: deal.endsAt,
+        discountPercent: Math.round(((product.priceMin - deal.price) / product.priceMin) * 100),
+        flagged: !!deal.flagged,
+        flagReason: deal.flagReason,
+      },
+      state,
+    };
+  }
+
+  /**
    * Admin kết thúc khuyến mãi ngay lập tức — cùng cơ chế `endDeal()` (xoá hẳn
    * `activeDeal`, không lùi `endsAt`), khác ở chỗ không giới hạn theo shop sở
    * hữu và có báo shop + ghi nhật ký. Đơn đã bán trong lúc khuyến mãi còn hiệu

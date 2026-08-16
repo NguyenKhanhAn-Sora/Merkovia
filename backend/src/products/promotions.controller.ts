@@ -74,6 +74,11 @@ export class AdminPromotionsController {
     return this.promotions.adminList(query);
   }
 
+  @Get(':productId')
+  detail(@Param('productId') productId: string) {
+    return this.promotions.adminGetDealDetail(productId);
+  }
+
   @Post(':productId/end')
   @HttpCode(HttpStatus.OK)
   end(

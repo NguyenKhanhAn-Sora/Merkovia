@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CircleNotch, Package, Warning, XCircle } from "@phosphor-icons/react";
+import { CircleNotch, Eye, Package, Warning, XCircle } from "@phosphor-icons/react";
 import {
   Badge,
   DataTable,
@@ -12,6 +12,8 @@ import {
   formatVnd,
   type BadgeTone,
 } from "../../../components/dashboard/ui";
+import ConfirmDialog from "../../../components/dashboard/ConfirmDialog";
+import PromotionDetailModal from "../../../components/dashboard/PromotionDetailModal";
 import {
   endPromotion,
   getPromotions,
@@ -31,64 +33,29 @@ function fmtDate(d?: string) {
   return new Date(d).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" });
 }
 
-/** Kết thúc khuyến mãi — xác nhận trước khi làm, gọn trong 1 ô bảng. */
-function EndDealAction({
-  item,
-  onEnded,
+/** Nút icon-only tự đủ class — GhostButton icon-only bị base `px-4` đè mất icon (xem categories/reviews). */
+function IconActionButton({
+  icon: IconCmp,
+  label,
+  tone = "default",
+  onClick,
 }: {
-  item: AdminPromotionItem;
-  onEnded: (productId: string) => void;
+  icon: typeof Eye;
+  label: string;
+  tone?: "default" | "danger";
+  onClick: () => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  if (confirming) {
-    return (
-      <div className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => setConfirming(false)}
-            className="h-8 rounded-lg px-2.5 text-[12.5px] text-star/55 transition-colors hover:text-star/80"
-          >
-            Huỷ
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError("");
-              try {
-                await endPromotion(item.productId);
-                onEnded(item.productId);
-              } catch (e) {
-                setError(e instanceof Error ? e.message : "Không xử lý được.");
-                setBusy(false);
-              }
-            }}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-rose-500/90 px-3 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {busy && <CircleNotch size={13} className="animate-spin" />}
-            Xác nhận
-          </button>
-        </div>
-        {error && <p className="text-[11.5px] text-rose-300">{error}</p>}
-      </div>
-    );
-  }
-
   return (
     <button
       type="button"
-      onClick={() => setConfirming(true)}
-      aria-label="Kết thúc khuyến mãi"
-      title="Kết thúc khuyến mãi"
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-star/70 transition-colors hover:border-rose-500/40 hover:text-rose-300 active:scale-[0.98]"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-star/70 transition-colors active:scale-[0.98] ${
+        tone === "danger" ? "hover:border-rose-500/40 hover:text-rose-300" : "hover:border-white/20 hover:text-star"
+      }`}
     >
-      <XCircle size={15} weight="regular" />
+      <IconCmp size={15} weight="regular" />
     </button>
   );
 }
@@ -98,6 +65,11 @@ export default function PromotionsPage() {
   const [data, setData] = useState<AdminPromotionListResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [endTarget, setEndTarget] = useState<AdminPromotionItem | null>(null);
+  const [ending, setEnding] = useState(false);
+  const [endError, setEndError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -136,6 +108,21 @@ export default function PromotionsPage() {
           }
         : prev,
     );
+  }
+
+  async function confirmEndFromRow() {
+    if (!endTarget) return;
+    setEnding(true);
+    setEndError("");
+    try {
+      await endPromotion(endTarget.productId);
+      removeLocal(endTarget.productId);
+      setEndTarget(null);
+    } catch (e) {
+      setEndError(e instanceof Error ? e.message : "Không xử lý được.");
+    } finally {
+      setEnding(false);
+    }
   }
 
   return (
@@ -208,7 +195,18 @@ export default function PromotionsPage() {
                   {fmtDate(p.deal?.endsAt)}
                 </Td>
                 <Td>
-                  <EndDealAction item={p} onEnded={removeLocal} />
+                  <span className="flex gap-1.5">
+                    <IconActionButton icon={Eye} label="Xem chi tiết" onClick={() => setDetailId(p.productId)} />
+                    <IconActionButton
+                      icon={XCircle}
+                      label="Kết thúc khuyến mãi"
+                      tone="danger"
+                      onClick={() => {
+                        setEndError("");
+                        setEndTarget(p);
+                      }}
+                    />
+                  </span>
                 </Td>
               </tr>
             ))}
@@ -224,6 +222,42 @@ export default function PromotionsPage() {
           và tự quyết định kết thúc hay bỏ qua.
         </p>
       )}
+
+      {detailId && (
+        <PromotionDetailModal
+          productId={detailId}
+          onClose={() => setDetailId(null)}
+          onEnded={(productId) => removeLocal(productId)}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!endTarget}
+        title="Kết thúc khuyến mãi này?"
+        description={
+          <>
+            {endTarget && (
+              <>
+                Khuyến mãi cho sản phẩm <strong className="text-star/80">&ldquo;{endTarget.name}&rdquo;</strong> sẽ
+                bị gỡ khỏi trang sản phẩm ngay lập tức và gian hàng sẽ nhận được thông báo.
+                {endTarget.flagged && " Khuyến mãi này đang bị nghi ngờ giá ảo."}
+              </>
+            )}
+            {endError && <p className="mt-2 text-rose-300">{endError}</p>}
+          </>
+        }
+        confirmLabel="Kết thúc"
+        tone="danger"
+        icon={XCircle}
+        busy={ending}
+        onConfirm={() => void confirmEndFromRow()}
+        onClose={() => {
+          if (!ending) {
+            setEndTarget(null);
+            setEndError("");
+          }
+        }}
+      />
     </div>
   );
 }
