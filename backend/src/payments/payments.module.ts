@@ -27,6 +27,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { PlatformSettingsModule } from '../platform-settings/platform-settings.module';
 
 /**
  * Thanh toán: tài khoản nhận tiền, thu tiền người mua, chi tiền người bán.
@@ -50,6 +51,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     AdminAuthModule, // AdminAuthGuard cho trang đối soát rút tiền
     NotificationsModule, // báo "đơn mới" cho người bán khi thanh toán online xong
     AuditLogModule, // ghi nhật ký khi admin chốt thủ công đợt chi bị kẹt
+    PlatformSettingsModule, // hoa hồng, số ngày giữ tiền, SLA xác nhận đơn
   ],
   controllers: [
     PaymentsController,

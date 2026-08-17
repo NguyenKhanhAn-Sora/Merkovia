@@ -16,6 +16,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { PlatformSettingsModule } from '../platform-settings/platform-settings.module';
 
 /** Người mua báo cáo gian hàng vi phạm; admin xem hàng đợi ưu tiên và xử lý. */
 @Module({
@@ -33,6 +34,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     NotificationsModule, // báo vi phạm real-time cho gian hàng
     AuditLogModule, // ghi nhật ký khi admin xử lý report/gỡ đình chỉ
     ShopSuspensionModule, // lịch tự động gỡ đình chỉ (tách riêng, xem shop-suspension.module.ts)
+    PlatformSettingsModule, // ngưỡng điểm xếp bậc ưu tiên hàng đợi
   ],
   controllers: [ShopReportsController, AdminShopReportsController],
   providers: [ShopReportsService],

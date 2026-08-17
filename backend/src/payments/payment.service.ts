@@ -17,6 +17,7 @@ import {
 import { config } from '../config/config';
 import { shortId } from '../common/text';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
 /**
@@ -40,6 +41,7 @@ export class PaymentService {
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
     private readonly gateway: PaymentGatewayProvider,
     private readonly notifications: NotificationsService,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   private newCode(): string {
@@ -311,6 +313,7 @@ export class PaymentService {
     // người bán) mà từ lúc thật sự vào hàng đợi xử lý, đối xứng với đơn COD
     // (xem `buildGroups`, hạn chốt ngay lúc đặt vì COD vào thẳng `pending`).
     const paidNow = new Date();
+    const s = this.settings.get();
     const applied = await this.orderModel.updateMany(
       { _id: { $in: payment.orders }, status: 'pending_payment' },
       {
@@ -318,10 +321,10 @@ export class PaymentService {
           status: 'pending',
           paidAt: paidNow,
           sellerActionDeadlineAt: new Date(
-            paidNow.getTime() + config.order.confirmHours * 3_600_000,
+            paidNow.getTime() + s.orderConfirmHours * 3_600_000,
           ),
           sellerActionWarnAt: new Date(
-            paidNow.getTime() + config.order.confirmWarnHours * 3_600_000,
+            paidNow.getTime() + s.orderConfirmWarnHours * 3_600_000,
           ),
         },
         $unset: { paymentExpiresAt: '' },

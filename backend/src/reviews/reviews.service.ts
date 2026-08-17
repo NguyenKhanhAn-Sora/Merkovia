@@ -26,7 +26,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import { User, type UserDocument } from '../users/schemas/user.schema';
-import { config } from '../config/config';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -68,6 +68,7 @@ export class ReviewsService {
     private readonly userModel: Model<UserDocument>,
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   /* ------------------------------ Người mua ------------------------------ */
@@ -199,7 +200,7 @@ export class ReviewsService {
     );
     if (new Date() > deadline) {
       throw new ForbiddenException(
-        `Đã quá hạn sửa đánh giá (${config.reviewEditWindowHours} giờ kể từ lúc đăng).`,
+        `Đã quá hạn sửa đánh giá (${this.settings.get().reviewEditWindowHours} giờ kể từ lúc đăng).`,
       );
     }
 
@@ -227,7 +228,7 @@ export class ReviewsService {
 
   private reviewEditDeadline(createdAt: Date): Date {
     return new Date(
-      createdAt.getTime() + config.reviewEditWindowHours * 3_600_000,
+      createdAt.getTime() + this.settings.get().reviewEditWindowHours * 3_600_000,
     );
   }
 

@@ -12,10 +12,10 @@ import { Payout, PayoutDocument, PayoutStatus } from './schemas/payout.schema';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { PayoutProvider } from './gateway/payout.provider';
-import { config } from '../config/config';
 import { shortId } from '../common/text';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 
@@ -34,6 +34,7 @@ export class PayoutService {
     private readonly provider: PayoutProvider,
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   private newCode(): string {
@@ -54,7 +55,8 @@ export class PayoutService {
    * hàng, tiền đã sang tay và không đòi lại được. Lấy mốc xa hơn trong hai cái.
    */
   private holdCutoff(now = new Date()): Date {
-    const holdDays = Math.max(config.payoutHoldDays, config.returnWindowDays);
+    const s = this.settings.get();
+    const holdDays = Math.max(s.payoutHoldDays, s.returnWindowDays);
     return new Date(now.getTime() - holdDays * 86_400_000);
   }
 
@@ -82,7 +84,7 @@ export class PayoutService {
    */
   private amountsOf(orders: OrderDocument[]) {
     const gross = orders.reduce((sum, o) => sum + o.itemsTotal, 0);
-    const commission = Math.round(gross * config.commissionRate);
+    const commission = Math.round(gross * this.settings.get().commissionRate);
     return { gross, commission, net: gross - commission };
   }
 
@@ -126,8 +128,8 @@ export class PayoutService {
       holding,
       running,
       totalPaidOut: paidOut[0]?.total ?? 0,
-      commissionRate: config.commissionRate,
-      holdDays: config.payoutHoldDays,
+      commissionRate: this.settings.get().commissionRate,
+      holdDays: this.settings.get().payoutHoldDays,
       minPayout: MIN_PAYOUT_AMOUNT,
       canRequest:
         available.net >= MIN_PAYOUT_AMOUNT &&
@@ -154,7 +156,7 @@ export class PayoutService {
       },
     ]);
     const gross = rows[0]?.gross ?? 0;
-    const commission = Math.round(gross * config.commissionRate);
+    const commission = Math.round(gross * this.settings.get().commissionRate);
     return {
       gross,
       commission,
@@ -238,7 +240,7 @@ export class PayoutService {
         orders: orders.map((o) => o._id),
         grossAmount: gross,
         commissionAmount: commission,
-        commissionRate: config.commissionRate,
+        commissionRate: this.settings.get().commissionRate,
         netAmount: net,
         status: 'pending',
         // Chụp lại: người bán đổi tài khoản sau này thì đợt chi cũ vẫn phải

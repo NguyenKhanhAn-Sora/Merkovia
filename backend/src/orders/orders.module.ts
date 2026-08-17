@@ -16,6 +16,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { PlatformSettingsModule } from '../platform-settings/platform-settings.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     AdminAuthModule, // AdminAuthGuard (xử lý tranh chấp thay shop bị đình chỉ)
     NotificationsModule, // báo tin đơn hàng cho hai phía
     AuditLogModule, // ghi nhật ký khi admin xử lý tranh chấp thay shop bị đình chỉ
+    PlatformSettingsModule, // SLA xác nhận/giao hàng, hạn trả hàng
   ],
   controllers: [OrdersController, ShopOrdersController, AdminOrdersController],
   providers: [OrdersService],

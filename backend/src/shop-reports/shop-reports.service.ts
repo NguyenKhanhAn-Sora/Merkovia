@@ -28,7 +28,7 @@ import { MailService } from '../auth/mail.service';
 import { ShopSuspensionService } from './shop-suspension.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
-import { config } from '../config/config';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 
 const QUEUE_SCAN_LIMIT = 1000;
 
@@ -178,6 +178,7 @@ export class ShopReportsService {
     private readonly mail: MailService,
     private readonly suspension: ShopSuspensionService,
     private readonly auditLog: AuditLogService,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   /* -------------------------------- Người mua ------------------------------- */
@@ -261,7 +262,7 @@ export class ShopReportsService {
    * KHÁC NHAU của shop đó. Vì sao không chỉ dựa lý do/số lượng: một tài khoản
    * đơn lẻ, mới tạo, chưa từng mua hàng, chỉ cần chọn lý do nặng là đẩy ngay
    * một shop lên mức khẩn cấp — không ổn khi hệ thống lớn hơn (dễ bị lợi dụng
-   * để hại đối thủ). Ngưỡng điểm nằm ở `config.reports.*`.
+   * để hại đối thủ). Ngưỡng điểm là cấu hình toàn sàn — xem `PlatformSettingsService`.
    *
    * Mỗi người báo cáo chỉ đóng góp ĐÚNG MỘT LẦN — báo cáo MỚI NHẤT của họ —
    * dù về sau có báo cáo lại nhiều lần cho cùng shop (được phép re-file sau
@@ -327,12 +328,13 @@ export class ShopReportsService {
         if (!latest || rep.createdAt > latest) latest = rep.createdAt;
       }
 
+      const s = this.settings.get();
       const tier: ReportQueueItem['tier'] =
-        score >= config.reports.urgentScore
+        score >= s.reportUrgentScore
           ? 'urgent'
-          : score >= config.reports.highScore
+          : score >= s.reportHighScore
             ? 'high'
-            : score >= config.reports.mediumScore
+            : score >= s.reportMediumScore
               ? 'medium'
               : 'low';
 

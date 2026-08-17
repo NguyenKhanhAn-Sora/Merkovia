@@ -40,9 +40,9 @@ import { QueryOrdersDto } from './dto/query-orders.dto';
 import { RequestReturnDto } from './dto/return.dto';
 import { isDealLive } from '../products/deal';
 import { shortId } from '../common/text';
-import { config } from '../config/config';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 
@@ -113,18 +113,6 @@ const BUYER_CANCELLABLE: readonly OrderStatus[] = [
 /** Người bán được từ chối đơn cho tới trước khi bàn giao vận chuyển. */
 const SELLER_CANCELLABLE: readonly OrderStatus[] = ['pending', 'confirmed'];
 
-/** Số ngày kể từ lúc giao thành công mà người mua còn được yêu cầu trả hàng. */
-const RETURN_WINDOW_DAYS = config.returnWindowDays;
-
-/**
- * SLA xử lý đơn của người bán (giờ) — xem chú thích ở `config.order` cho lý
- * do chia hai mốc nhắc/huỷ thay vì cắt cứng một lần.
- */
-const ORDER_CONFIRM_HOURS = config.order.confirmHours;
-const ORDER_CONFIRM_WARN_HOURS = config.order.confirmWarnHours;
-const ORDER_SHIP_HOURS = config.order.shipHours;
-const ORDER_SHIP_WARN_HOURS = config.order.shipWarnHours;
-
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -141,6 +129,7 @@ export class OrdersService {
     private readonly shipping: ShippingProvider,
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
+    private readonly settings: PlatformSettingsService,
   ) {}
 
   /** Mô tả ngắn các món trong đơn cho nội dung thông báo. */
@@ -619,11 +608,12 @@ export class OrdersService {
       // tính vào SLA của người bán.
       if (!online) {
         const now = Date.now();
+        const s = this.settings.get();
         group.sellerActionDeadlineAt = new Date(
-          now + ORDER_CONFIRM_HOURS * 3_600_000,
+          now + s.orderConfirmHours * 3_600_000,
         );
         group.sellerActionWarnAt = new Date(
-          now + ORDER_CONFIRM_WARN_HOURS * 3_600_000,
+          now + s.orderConfirmWarnHours * 3_600_000,
         );
       }
     }
@@ -1117,6 +1107,7 @@ export class OrdersService {
      *  - `shipping`: hàng đã rời tay người bán, không còn SLA nào của họ nữa.
      */
     const now = new Date();
+    const s = this.settings.get();
     const slaFields: {
       sellerActionDeadlineAt: Date | null;
       sellerActionWarnAt: Date | null;
@@ -1125,10 +1116,10 @@ export class OrdersService {
       next === 'confirmed'
         ? {
             sellerActionDeadlineAt: new Date(
-              now.getTime() + ORDER_SHIP_HOURS * 3_600_000,
+              now.getTime() + s.orderShipHours * 3_600_000,
             ),
             sellerActionWarnAt: new Date(
-              now.getTime() + ORDER_SHIP_WARN_HOURS * 3_600_000,
+              now.getTime() + s.orderShipWarnHours * 3_600_000,
             ),
             sellerReminderSentAt: null,
           }
@@ -1324,7 +1315,7 @@ export class OrdersService {
   private returnDeadline(order: OrderDocument): Date | null {
     if (!order.deliveredAt) return null;
     return new Date(
-      order.deliveredAt.getTime() + RETURN_WINDOW_DAYS * 86_400_000,
+      order.deliveredAt.getTime() + this.settings.get().returnWindowDays * 86_400_000,
     );
   }
 
@@ -1341,9 +1332,10 @@ export class OrdersService {
   /**
    * Người mua yêu cầu trả hàng sau khi đã nhận.
    *
-   * Chỉ mở trong `RETURN_WINDOW_DAYS` ngày kể từ lúc giao — quá đó thì hàng đã
-   * dùng lâu, không còn căn cứ để trả. Việc DUYỆT thuộc về người bán; ở đây chỉ
-   * ghi nhận yêu cầu, chưa đụng tới kho hay tiền.
+   * Chỉ mở trong `returnWindowDays` ngày kể từ lúc giao (cấu hình toàn sàn, xem
+   * `PlatformSettingsService`) — quá đó thì hàng đã dùng lâu, không còn căn cứ
+   * để trả. Việc DUYỆT thuộc về người bán; ở đây chỉ ghi nhận yêu cầu, chưa
+   * đụng tới kho hay tiền.
    */
   async requestReturn(user: UserDocument, id: string, dto: RequestReturnDto) {
     const order = await this.findOwnedByBuyer(user, id);
@@ -1364,7 +1356,7 @@ export class OrdersService {
     const deadline = this.returnDeadline(order);
     if (!deadline || new Date() > deadline) {
       throw new BadRequestException(
-        `Đã quá hạn trả hàng (${RETURN_WINDOW_DAYS} ngày kể từ khi nhận hàng).`,
+        `Đã quá hạn trả hàng (${this.settings.get().returnWindowDays} ngày kể từ khi nhận hàng).`,
       );
     }
 
@@ -1994,7 +1986,7 @@ export class OrdersService {
       /** Trả hàng — chỉ mở trong cửa sổ sau khi giao (xem `canRequestReturn`). */
       canRequestReturn: this.canRequestReturn(o),
       returnRequest: o.returnRequest,
-      returnWindowDays: RETURN_WINDOW_DAYS,
+      returnWindowDays: this.settings.get().returnWindowDays,
       returnableUntil: this.returnDeadline(o)?.toISOString(),
       ...(full
         ? { shippingAddress: o.shippingAddress, timeline: o.timeline }
@@ -2187,7 +2179,7 @@ export class OrdersService {
   /**
    * Bước 2/2 — tự huỷ đơn ĐÃ QUA hạn xử lý mà người bán vẫn không làm gì.
    * Đơn đã được nhắc ở bước 1 trước khi tới được đây (hạn nhắc luôn sớm hơn
-   * hạn huỷ — xem `config.order`), nên đây không phải một cú cắt bất ngờ.
+   * hạn huỷ — xem `PlatformSettingsService`), nên đây không phải một cú cắt bất ngờ.
    *
    * Dùng lại `cancelOrder` — hoàn kho, đánh dấu hoàn tiền nếu đã trả online —
    * y hệt mọi đường huỷ khác, chỉ khác người khởi xướng (`system`) và lý do.
