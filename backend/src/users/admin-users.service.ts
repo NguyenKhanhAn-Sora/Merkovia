@@ -101,19 +101,25 @@ export class AdminUsersService {
     const match: Record<string, unknown> = { deletedAt: null };
     if (tab === 'buyer') match.roles = 'buyer';
     if (tab === 'seller') match.roles = 'seller';
-    if (tab === 'locked') {
-      match.$or = [
-        { status: 'suspended' },
-        { buyerLocked: true },
-        { sellerLocked: true },
-      ];
-    }
 
+    // Tab lọc theo trạng thái khoá VÀ tìm kiếm đều dùng $or riêng — gộp qua
+    // $and để không cái này ghi đè cái kia (bug cũ: search xoá mất filter tab).
+    const andConds: Record<string, unknown>[] = [];
+    if (tab === 'locked') {
+      andConds.push({
+        $or: [
+          { status: 'suspended' },
+          { buyerLocked: true },
+          { sellerLocked: true },
+        ],
+      });
+    }
     if (query.q?.trim()) {
       const q = query.q.trim();
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      match.$or = [{ email: rx }, { phone: rx }];
+      andConds.push({ $or: [{ email: rx }, { phone: rx }] });
     }
+    if (andConds.length) match.$and = andConds;
 
     const [items, total, counts] = await Promise.all([
       this.userModel
@@ -250,36 +256,47 @@ export class AdminUsersService {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Không tìm thấy tài khoản.');
     }
-    const user = await this.userModel.findOne({ _id: id, deletedAt: null });
-    if (!user) throw new NotFoundException('Không tìm thấy tài khoản.');
 
-    const alreadyLocked =
+    // Điều kiện "chưa bị khoá scope này" nằm ngay trong filter của
+    // findOneAndUpdate — atomic, tránh 2 tab admin cùng khoá lúc hai request
+    // đọc trùng thời điểm đều thấy "chưa khoá" rồi cùng ghi (double email,
+    // double thông báo, double dòng audit log cho MỘT hành động).
+    const notLockedFilter: Record<string, unknown> =
       scope === 'all'
-        ? user.status === 'suspended'
+        ? { status: { $ne: 'suspended' } }
         : scope === 'buyer'
-          ? user.buyerLocked
-          : user.sellerLocked;
-    if (alreadyLocked) {
+          ? { buyerLocked: { $ne: true } }
+          : { sellerLocked: { $ne: true } };
+    const setFields: Record<string, unknown> =
+      scope === 'all'
+        ? { status: 'suspended' }
+        : scope === 'buyer'
+          ? { buyerLocked: true }
+          : { sellerLocked: true };
+
+    const user = await this.userModel.findOneAndUpdate(
+      { _id: id, deletedAt: null, ...notLockedFilter },
+      { $set: setFields, $inc: { tokenVersion: 1 } }, // thu hồi mọi phiên đang đăng nhập
+      { new: true },
+    );
+    if (!user) {
+      const exists = await this.userModel.exists({ _id: id, deletedAt: null });
+      if (!exists) throw new NotFoundException('Không tìm thấy tài khoản.');
       throw new BadRequestException(
         `Tài khoản này đã bị hạn chế "${SCOPE_LABEL[scope]}" rồi.`,
       );
     }
 
-    if (scope === 'all') user.status = 'suspended';
-    if (scope === 'buyer') user.buyerLocked = true;
-    if (scope === 'seller') user.sellerLocked = true;
-    user.tokenVersion = (user.tokenVersion ?? 0) + 1; // thu hồi mọi phiên đang đăng nhập
-    await user.save();
-
     if (
       (scope === 'seller' || scope === 'all') &&
       user.roles.includes('seller')
     ) {
-      const shop = await this.shopModel.findOne({ owner: user._id });
-      if (shop && shop.status !== 'suspended') {
-        shop.status = 'suspended';
-        shop.suspendedUntil = null;
-        await shop.save();
+      const shop = await this.shopModel.findOneAndUpdate(
+        { owner: user._id, status: { $ne: 'suspended' } },
+        { $set: { status: 'suspended', suspendedUntil: null } },
+        { new: true },
+      );
+      if (shop) {
         await this.suspension.cancel(String(shop._id));
         this.logger.log(
           `Khoá tài khoản (${scope}) ${id} → tự động đình chỉ gian hàng ${String(shop._id)}.`,
@@ -319,25 +336,32 @@ export class AdminUsersService {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Không tìm thấy tài khoản.');
     }
-    const user = await this.userModel.findOne({ _id: id, deletedAt: null });
-    if (!user) throw new NotFoundException('Không tìm thấy tài khoản.');
 
-    const isLocked =
+    const lockedFilter: Record<string, unknown> =
       scope === 'all'
-        ? user.status === 'suspended'
+        ? { status: 'suspended' }
         : scope === 'buyer'
-          ? user.buyerLocked
-          : user.sellerLocked;
-    if (!isLocked) {
+          ? { buyerLocked: true }
+          : { sellerLocked: true };
+    const setFields: Record<string, unknown> =
+      scope === 'all'
+        ? { status: 'active' }
+        : scope === 'buyer'
+          ? { buyerLocked: false }
+          : { sellerLocked: false };
+
+    const user = await this.userModel.findOneAndUpdate(
+      { _id: id, deletedAt: null, ...lockedFilter },
+      { $set: setFields },
+      { new: true },
+    );
+    if (!user) {
+      const exists = await this.userModel.exists({ _id: id, deletedAt: null });
+      if (!exists) throw new NotFoundException('Không tìm thấy tài khoản.');
       throw new BadRequestException(
         `Tài khoản này hiện không bị hạn chế "${SCOPE_LABEL[scope]}".`,
       );
     }
-
-    if (scope === 'all') user.status = 'active';
-    if (scope === 'buyer') user.buyerLocked = false;
-    if (scope === 'seller') user.sellerLocked = false;
-    await user.save();
 
     if (user.email) {
       await this.mail

@@ -62,8 +62,11 @@ export class AdminCategoriesController {
   /** Kéo-thả sắp xếp lại: client gửi đúng thứ tự mới của cả nhóm anh em. */
   @Post('reorder')
   @HttpCode(HttpStatus.OK)
-  reorder(@Body() dto: ReorderCategoriesDto) {
-    return this.categories.adminReorder(dto.parentId, dto.orderedIds);
+  reorder(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Body() dto: ReorderCategoriesDto,
+  ) {
+    return this.categories.adminReorder(admin, dto.parentId, dto.orderedIds);
   }
 
   @Patch(':id/visibility')

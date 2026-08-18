@@ -562,16 +562,11 @@ export class PayoutService {
   ) {
     const payout = await this.requireProcessingPayout(id);
 
-    await this.payoutModel.updateOne(
-      { _id: payout._id },
-      {
-        $set: {
-          adminResolutionNote: note,
-          resolvedByAdminEmail: admin.email,
-        },
-      },
-    );
-
+    // Chỉ ghi metadata SAU KHI thắng cuộc đua ở `finalizePayout` (filter điều
+    // kiện `status:'processing'` của chính nó) — trước đây ghi ngay từ đầu,
+    // nên một request thua cuộc (VD hai admin cùng chốt gần lúc nhau) vẫn để
+    // lại `adminResolutionNote`/`resolvedByAdminEmail` SAI trên payout dù
+    // quyết định của họ chưa từng có hiệu lực thật.
     const changed = await this.finalizePayout(payout._id, {
       status: action,
       failureReason: action === 'failed' ? note : undefined,
@@ -581,6 +576,16 @@ export class PayoutService {
         'Đợt chi này vừa được xử lý bởi thao tác khác, vui lòng tải lại.',
       );
     }
+
+    await this.payoutModel.updateOne(
+      { _id: payout._id },
+      {
+        $set: {
+          adminResolutionNote: note,
+          resolvedByAdminEmail: admin.email,
+        },
+      },
+    );
 
     await this.auditLog.log({
       adminEmail: admin.email,

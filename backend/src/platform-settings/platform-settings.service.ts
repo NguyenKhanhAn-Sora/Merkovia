@@ -79,22 +79,26 @@ export class PlatformSettingsService implements OnModuleInit {
     try {
       const doc = await this.model.findOne().lean();
       if (!doc) return; // chưa có bản ghi nào — giữ nguyên mặc định
-      this.snapshot = {
-        commissionRate: doc.commissionRate,
-        payoutHoldDays: doc.payoutHoldDays,
-        returnWindowDays: doc.returnWindowDays,
-        reviewEditWindowHours: doc.reviewEditWindowHours,
-        orderConfirmHours: doc.orderConfirmHours,
-        orderConfirmWarnHours: doc.orderConfirmWarnHours,
-        orderShipHours: doc.orderShipHours,
-        orderShipWarnHours: doc.orderShipWarnHours,
-        reportUrgentScore: doc.reportUrgentScore,
-        reportHighScore: doc.reportHighScore,
-        reportMediumScore: doc.reportMediumScore,
-      };
+      this.applySnapshot(doc);
     } catch (err: unknown) {
       this.logger.warn(`Không nạp lại được cấu hình sàn, giữ cache cũ: ${String(err)}`);
     }
+  }
+
+  private applySnapshot(doc: PlatformSettingsSnapshot): void {
+    this.snapshot = {
+      commissionRate: doc.commissionRate,
+      payoutHoldDays: doc.payoutHoldDays,
+      returnWindowDays: doc.returnWindowDays,
+      reviewEditWindowHours: doc.reviewEditWindowHours,
+      orderConfirmHours: doc.orderConfirmHours,
+      orderConfirmWarnHours: doc.orderConfirmWarnHours,
+      orderShipHours: doc.orderShipHours,
+      orderShipWarnHours: doc.orderShipWarnHours,
+      reportUrgentScore: doc.reportUrgentScore,
+      reportHighScore: doc.reportHighScore,
+      reportMediumScore: doc.reportMediumScore,
+    };
   }
 
   private async getOrCreateDoc(): Promise<PlatformSettingsDocument> {
@@ -151,8 +155,12 @@ export class PlatformSettingsService implements OnModuleInit {
     before.updatedBy = admin.email;
     await before.save();
 
-    // Áp dụng ngay cho luồng nghiệp vụ tiếp theo — không cần khởi động lại server.
-    await this.refreshFromDb();
+    // Gán thẳng cache từ document VỪA lưu — không đọc lại DB lần hai. Đọc lại
+    // độc lập (refreshFromDb) từng có nguy cơ đảo thứ tự khi 2 admin lưu gần
+    // nhau: request A lưu trước nhưng round-trip đọc lại của A hoàn tất SAU
+    // round-trip của B, khiến cache bị ghi đè ngược về giá trị cũ hơn dữ liệu
+    // thật trong DB. Dùng thẳng `before` thì không có round-trip nào để đảo.
+    this.applySnapshot(before);
 
     await this.auditLog.log({
       adminEmail: admin.email,

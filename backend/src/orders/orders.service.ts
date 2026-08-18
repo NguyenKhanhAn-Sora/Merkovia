@@ -981,11 +981,27 @@ export class OrdersService {
         : 'Người bán';
 
     if (!approve) {
+      // Atomic: điều kiện "còn đang pending" nằm trong filter, tránh 2 request
+      // xử lý cùng lúc (VD một duyệt một từ chối) ghi đè lẫn nhau mà không báo
+      // lỗi — giống cơ chế `cancelOrder` ngay bên dưới dùng cho nhánh duyệt.
+      const rejectRes = await this.orderModel.updateOne(
+        { _id: order._id, 'cancelRequest.status': 'pending' },
+        {
+          $set: {
+            'cancelRequest.status': 'rejected',
+            'cancelRequest.respondedAt': new Date(),
+            'cancelRequest.sellerNote': note?.trim(),
+          },
+        },
+      );
+      if (rejectRes.modifiedCount !== 1) {
+        throw new ConflictException(
+          'Yêu cầu huỷ này vừa được xử lý bởi thao tác khác. Vui lòng tải lại trang.',
+        );
+      }
       order.cancelRequest.status = 'rejected';
       order.cancelRequest.respondedAt = new Date();
       order.cancelRequest.sellerNote = note?.trim();
-      order.markModified('cancelRequest');
-      await order.save();
       await this.notifications.notifyUser(order.buyer, 'buyer', {
         type: 'cancel_rejected',
         title: 'Yêu cầu huỷ bị từ chối',
@@ -1005,13 +1021,28 @@ export class OrdersService {
       return { ok: true, order: this.toSellerOrder(order, true) };
     }
 
-    // Đánh dấu ĐÃ DUYỆT trước, rồi mới huỷ. `cancelOrder` giành quyền bằng
-    // updateOne có điều kiện nên phải ghi phần này xong xuôi trước đó.
+    // Đánh dấu ĐÃ DUYỆT trước, rồi mới huỷ — atomic cùng điều kiện với nhánh
+    // từ chối ở trên, để 2 request xử lý cùng lúc không thể cùng "thắng".
+    // `cancelOrder` giành quyền bằng updateOne có điều kiện riêng của chính nó
+    // nên phần này phải ghi xong xuôi trước đó.
+    const approveRes = await this.orderModel.updateOne(
+      { _id: order._id, 'cancelRequest.status': 'pending' },
+      {
+        $set: {
+          'cancelRequest.status': 'approved',
+          'cancelRequest.respondedAt': new Date(),
+          'cancelRequest.sellerNote': note?.trim(),
+        },
+      },
+    );
+    if (approveRes.modifiedCount !== 1) {
+      throw new ConflictException(
+        'Yêu cầu huỷ này vừa được xử lý bởi thao tác khác. Vui lòng tải lại trang.',
+      );
+    }
     order.cancelRequest.status = 'approved';
     order.cancelRequest.respondedAt = new Date();
     order.cancelRequest.sellerNote = note?.trim();
-    order.markModified('cancelRequest');
-    await order.save();
 
     const res = await this.cancelOrder(
       order,
@@ -1463,11 +1494,27 @@ export class OrdersService {
         : 'Người bán';
 
     if (!approve) {
+      // Atomic: cùng nguyên tắc với nhánh duyệt bên dưới (giành quyền bằng
+      // filter điều kiện) — tránh một request duyệt, một request từ chối chạy
+      // gần như cùng lúc rồi cái sau âm thầm ghi đè cái trước không báo lỗi.
+      const rejectRes = await this.orderModel.updateOne(
+        { _id: order._id, 'returnRequest.status': 'requested' },
+        {
+          $set: {
+            'returnRequest.status': 'rejected',
+            'returnRequest.respondedAt': new Date(),
+            'returnRequest.sellerNote': note?.trim(),
+          },
+        },
+      );
+      if (rejectRes.modifiedCount !== 1) {
+        throw new ConflictException(
+          'Yêu cầu trả hàng này vừa được xử lý bởi thao tác khác. Vui lòng tải lại trang.',
+        );
+      }
       order.returnRequest.status = 'rejected';
       order.returnRequest.respondedAt = new Date();
       order.returnRequest.sellerNote = note?.trim();
-      order.markModified('returnRequest');
-      await order.save();
       await this.notifications.notifyUser(order.buyer, 'buyer', {
         type: 'return_rejected',
         title: 'Yêu cầu trả hàng bị từ chối',
@@ -1492,7 +1539,11 @@ export class OrdersService {
     // duyệt song song — chỉ bên đổi được bản ghi mới trừ lượt bán và ghi nợ.
     const now = new Date();
     const res = await this.orderModel.updateOne(
-      { _id: order._id, status: 'delivered' },
+      {
+        _id: order._id,
+        status: 'delivered',
+        'returnRequest.status': 'requested',
+      },
       {
         $set: {
           status: 'returned',

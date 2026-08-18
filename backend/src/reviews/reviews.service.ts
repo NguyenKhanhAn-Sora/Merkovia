@@ -218,7 +218,10 @@ export class ReviewsService {
 
     // Điểm sao đổi thì bù trừ đúng ô cũ/mới — trừ trước cộng sau để không bao
     // giờ có khoảnh khắc tổng bị âm nếu hai request xen kẽ nhau.
-    if (dto.rating !== oldRating) {
+    // Đánh giá đang bị ẩn thì KHÔNG đụng vào aggregate — nó đã bị trừ ra lúc ẩn
+    // (adminHide) và chỉ được cộng lại đúng 1 lần theo rating hiện tại lúc gỡ
+    // ẩn (adminUnhide); sửa nội dung trong lúc đang ẩn chỉ đổi field lưu trữ.
+    if (dto.rating !== oldRating && !review.hidden) {
       await this.applyRatingDelta(review.product, deltaFor(oldRating, -1));
       await this.applyRatingDelta(review.product, deltaFor(dto.rating, +1));
     }
@@ -469,7 +472,10 @@ export class ReviewsService {
         }>('buyer', 'email phone')
         .lean(),
       this.reviewModel.countDocuments(filter),
-      this.reviewModel.countDocuments({}),
+      // Không lọc gì cả — dùng ước lượng từ metadata collection (nhanh hơn hẳn
+      // COLLSCAN đếm thật) vì đây chỉ là số hiển thị trên tab, không cần chính
+      // xác tuyệt đối.
+      this.reviewModel.estimatedDocumentCount(),
       this.reviewModel.countDocuments({ $or: [{ hidden: true }, { replyHidden: true }] }),
     ]);
 
@@ -573,16 +579,28 @@ export class ReviewsService {
     reviewId: string,
     dto: HideReviewContentDto,
   ) {
-    const review = await this.findReviewOrThrow(reviewId);
-    if (review.hidden) {
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new NotFoundException('Không tìm thấy đánh giá.');
+    }
+    // Atomic: điều kiện "chưa ẩn" nằm trong filter, tránh 2 tab admin cùng ẩn
+    // một đánh giá trong cùng khoảnh khắc đọc trùng nhau (double trừ điểm sao).
+    const review = await this.reviewModel.findOneAndUpdate(
+      { _id: reviewId, hidden: { $ne: true } },
+      {
+        $set: {
+          hidden: true,
+          hiddenAt: new Date(),
+          hiddenBy: admin.email,
+          hiddenReason: dto.reason.trim(),
+        },
+      },
+      { new: true },
+    );
+    if (!review) {
+      const exists = await this.reviewModel.exists({ _id: reviewId });
+      if (!exists) throw new NotFoundException('Không tìm thấy đánh giá.');
       throw new BadRequestException('Đánh giá này đã bị ẩn rồi.');
     }
-
-    review.hidden = true;
-    review.hiddenAt = new Date();
-    review.hiddenBy = admin.email;
-    review.hiddenReason = dto.reason.trim();
-    await review.save();
 
     await this.applyRatingDelta(review.product, deltaFor(review.rating, -1));
 
@@ -605,16 +623,22 @@ export class ReviewsService {
 
   /** Gỡ ẩn — cộng lại điểm sao theo rating HIỆN TẠI của đánh giá (có thể đã được buyer sửa trong lúc đang ẩn). */
   async adminUnhide(admin: AdminPrincipal, reviewId: string) {
-    const review = await this.findReviewOrThrow(reviewId);
-    if (!review.hidden) {
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new NotFoundException('Không tìm thấy đánh giá.');
+    }
+    const review = await this.reviewModel.findOneAndUpdate(
+      { _id: reviewId, hidden: true },
+      {
+        $set: { hidden: false },
+        $unset: { hiddenAt: 1, hiddenBy: 1, hiddenReason: 1 },
+      },
+      { new: true },
+    );
+    if (!review) {
+      const exists = await this.reviewModel.exists({ _id: reviewId });
+      if (!exists) throw new NotFoundException('Không tìm thấy đánh giá.');
       throw new BadRequestException('Đánh giá này hiện không bị ẩn.');
     }
-
-    review.hidden = false;
-    review.hiddenAt = undefined;
-    review.hiddenBy = undefined;
-    review.hiddenReason = undefined;
-    await review.save();
 
     await this.applyRatingDelta(review.product, deltaFor(review.rating, +1));
 
@@ -644,19 +668,28 @@ export class ReviewsService {
     reviewId: string,
     dto: HideReviewContentDto,
   ) {
-    const review = await this.findReviewOrThrow(reviewId);
-    if (!review.reply) {
-      throw new BadRequestException('Đánh giá này chưa có phản hồi.');
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new NotFoundException('Không tìm thấy đánh giá.');
     }
-    if (review.replyHidden) {
+    const review = await this.reviewModel.findOneAndUpdate(
+      { _id: reviewId, reply: { $ne: null }, replyHidden: { $ne: true } },
+      {
+        $set: {
+          replyHidden: true,
+          replyHiddenAt: new Date(),
+          replyHiddenBy: admin.email,
+          replyHiddenReason: dto.reason.trim(),
+        },
+      },
+      { new: true },
+    );
+    if (!review) {
+      const current = await this.findReviewOrThrow(reviewId);
+      if (!current.reply) {
+        throw new BadRequestException('Đánh giá này chưa có phản hồi.');
+      }
       throw new BadRequestException('Phản hồi này đã bị ẩn rồi.');
     }
-
-    review.replyHidden = true;
-    review.replyHiddenAt = new Date();
-    review.replyHiddenBy = admin.email;
-    review.replyHiddenReason = dto.reason.trim();
-    await review.save();
 
     await this.notifications.notifyShop(review.shop, {
       type: 'review_reply_hidden',
@@ -676,16 +709,22 @@ export class ReviewsService {
   }
 
   async adminUnhideReply(admin: AdminPrincipal, reviewId: string) {
-    const review = await this.findReviewOrThrow(reviewId);
-    if (!review.replyHidden) {
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new NotFoundException('Không tìm thấy đánh giá.');
+    }
+    const review = await this.reviewModel.findOneAndUpdate(
+      { _id: reviewId, replyHidden: true },
+      {
+        $set: { replyHidden: false },
+        $unset: { replyHiddenAt: 1, replyHiddenBy: 1, replyHiddenReason: 1 },
+      },
+      { new: true },
+    );
+    if (!review) {
+      const exists = await this.reviewModel.exists({ _id: reviewId });
+      if (!exists) throw new NotFoundException('Không tìm thấy đánh giá.');
       throw new BadRequestException('Phản hồi này hiện không bị ẩn.');
     }
-
-    review.replyHidden = false;
-    review.replyHiddenAt = undefined;
-    review.replyHiddenBy = undefined;
-    review.replyHiddenReason = undefined;
-    await review.save();
 
     await this.notifications.notifyShop(review.shop, {
       type: 'review_reply_unhidden',

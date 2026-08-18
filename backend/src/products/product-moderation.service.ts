@@ -340,7 +340,8 @@ Trả lời bằng tiếng Việt, ngắn gọn, đúng định dạng JSON yêu
       ...(tab !== 'all' ? { 'moderation.state': tab } : {}),
     };
     if (query.q?.trim()) {
-      filter.name = { $regex: query.q.trim(), $options: 'i' };
+      const rx = query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.name = { $regex: rx, $options: 'i' };
     }
 
     // Hàng chờ xử lý xếp cũ nhất trước (FIFO) — các tab còn lại xem mới nhất trước.
@@ -435,8 +436,10 @@ Trả lời bằng tiếng Việt, ngắn gọn, đúng định dạng JSON yêu
     if (!Types.ObjectId.isValid(productId)) {
       throw new NotFoundException('Không tìm thấy sản phẩm.');
     }
-    if (action === 'reject' && !reason?.trim()) {
-      throw new BadRequestException('Cần nêu lý do khi từ chối sản phẩm.');
+    if (action === 'reject' && (reason?.trim().length ?? 0) < 5) {
+      throw new BadRequestException(
+        'Lý do từ chối cần ít nhất 5 ký tự — đây sẽ là thông báo gửi thẳng cho người bán.',
+      );
     }
     const product = await this.productModel
       .findById(productId)

@@ -78,3 +78,7 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+// Trang Kênh Quản trị luôn lọc theo deletedAt rồi sort createdAt mới nhất;
+// dashboard admin cũng đếm `countDocuments({ deletedAt: null })` mỗi lần tải.
+UserSchema.index({ deletedAt: 1, createdAt: -1 });

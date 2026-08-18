@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { CHAT_ROLES, type ChatRole } from './conversation.schema';
 
 export type MessageDocument = HydratedDocument<Message>;
@@ -30,7 +30,7 @@ export const MAX_MESSAGE_IMAGES = 6;
 @Schema({ timestamps: true })
 export class Message {
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'Conversation',
     required: true,
     index: true,
@@ -41,7 +41,7 @@ export class Message {
   senderRole: ChatRole;
 
   /** User thật đã gửi (người mua, hoặc chủ shop tại thời điểm gửi). */
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   sender: Types.ObjectId;
 
   /** Văn bản — KHÔNG bắt buộc vì tin có thể chỉ gồm ảnh. */

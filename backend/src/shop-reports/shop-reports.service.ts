@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -205,10 +206,6 @@ export class ShopReportsService {
       if (!Types.ObjectId.isValid(dto.orderId)) {
         throw new BadRequestException('Đơn hàng không hợp lệ.');
       }
-      // 🔴 `shop` PHẢI là ObjectId thật, không phải chuỗi: field này bị lỗi
-      // Mixed-type kinh niên của cả codebase (xem memory `merkovia-objectid-
-      // gotcha`) nên Mongoose không tự ép kiểu — so sánh với chuỗi sẽ luôn
-      // trượt dù đúng shop, khiến ngữ cảnh đơn hàng bị âm thầm rớt mất.
       const order = await this.orderModel
         .findOne({
           _id: dto.orderId,
@@ -238,15 +235,27 @@ export class ShopReportsService {
       key: e.key?.trim(),
     }));
 
-    await this.reportModel.create({
-      reporter: user._id,
-      shop: dto.shopId,
-      reasonType: dto.reasonType,
-      detail: dto.detail?.trim() || undefined,
-      order: orderId,
-      evidence,
-      status: 'pending',
-    });
+    try {
+      await this.reportModel.create({
+        reporter: user._id,
+        shop: dto.shopId,
+        reasonType: dto.reasonType,
+        detail: dto.detail?.trim() || undefined,
+        order: orderId,
+        evidence,
+        status: 'pending',
+      });
+    } catch (e: unknown) {
+      // Race hiếm: 2 request gửi báo cáo cùng lúc đều qua được check `.exists()`
+      // ở trên — index unique có điều kiện (status:'pending') ở tầng DB mới là
+      // chốt chặn thật, chặn dưới dạng lỗi trùng khoá (11000).
+      if (e && typeof e === 'object' && 'code' in e && e.code === 11000) {
+        throw new BadRequestException(
+          'Bạn đã gửi báo cáo cho gian hàng này và đang chờ xử lý.',
+        );
+      }
+      throw e;
+    }
     return { ok: true };
   }
 
@@ -271,9 +280,13 @@ export class ShopReportsService {
    * phụ thuộc hoàn toàn vào ràng buộc lúc ghi.
    */
   async priorityQueue(q?: string): Promise<ReportQueueItem[]> {
+    // Sort MỚI NHẤT trước rồi mới cắt limit: nếu tồn đọng vượt quá
+    // QUEUE_SCAN_LIMIT, thà bỏ sót báo cáo CŨ (đã chờ lâu, admin có thể đã
+    // biết) còn hơn bỏ sót báo cáo MỚI — một hàng đợi ưu tiên mà im lặng bỏ
+    // qua đúng báo cáo khẩn cấp vừa gửi thì phản tác dụng.
     const reports = await this.reportModel
       .find({ status: 'pending' })
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(QUEUE_SCAN_LIMIT)
       .select('shop reporter reasonType createdAt')
       .lean();
@@ -566,10 +579,19 @@ export class ShopReportsService {
       resolvedBy: admin.id,
     };
     const newStatus = dto.action === 'dismiss' ? 'dismissed' : 'resolved';
-    await this.reportModel.updateMany(
-      { _id: { $in: pending.map((p) => p._id) } },
+    // Filter lại `status: 'pending'` ngay trong updateMany — atomic: nếu một
+    // tab admin khác đã xử lý xong đúng lúc này, các report đã đổi trạng thái
+    // sẽ không khớp filter nữa, modifiedCount về 0 và request này dừng lại
+    // TRƯỚC KHI đụng vào shop.status, tránh 2 quyết định trái ngược cùng ghi đè.
+    const result = await this.reportModel.updateMany(
+      { _id: { $in: pending.map((p) => p._id) }, status: 'pending' },
       { $set: { status: newStatus, resolution } },
     );
+    if (result.modifiedCount === 0) {
+      throw new ConflictException(
+        'Các báo cáo này vừa được xử lý bởi thao tác khác. Vui lòng tải lại trang.',
+      );
+    }
 
     if (dto.action === 'suspend') {
       shop.status = 'suspended';
@@ -627,15 +649,16 @@ export class ShopReportsService {
     if (!Types.ObjectId.isValid(shopId)) {
       throw new BadRequestException('Gian hàng không hợp lệ.');
     }
-    const shop = await this.shopModel.findById(shopId).exec();
-    if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
-    if (shop.status !== 'suspended') {
+    const shop = await this.shopModel.findOneAndUpdate(
+      { _id: shopId, status: 'suspended' },
+      { $set: { status: 'active', suspendedUntil: null } },
+      { new: true },
+    );
+    if (!shop) {
+      const exists = await this.shopModel.exists({ _id: shopId });
+      if (!exists) throw new NotFoundException('Không tìm thấy gian hàng.');
       throw new BadRequestException('Gian hàng này hiện không bị đình chỉ.');
     }
-
-    shop.status = 'active';
-    shop.suspendedUntil = null;
-    await shop.save();
     await this.suspension.cancel(shopId);
 
     await this.notifications.notifyUser(shop.owner, 'seller', {

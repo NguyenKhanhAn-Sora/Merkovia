@@ -293,7 +293,9 @@ export class PromotionsService {
         'name slug images variants shop priceMin priceMax totalStock status activeDeal',
       )
       .sort({ 'activeDeal.endsAt': 1 })
-      .limit(300)
+      // KHÔNG giới hạn số lượng — trang này tự nhận là "số đếm phản ánh TOÀN
+      // BỘ khuyến mãi", giới hạn cứng sẽ âm thầm cắt mất khuyến mãi (kể cả
+      // đang bị nghi ngờ giá ảo) một khi sàn có hơn N deal cùng lúc.
       .populate<{ shop: { _id: Types.ObjectId; name: string } }>('shop', 'name')
       .lean();
 
@@ -400,7 +402,7 @@ export class PromotionsService {
         price: deal.price,
         startsAt: deal.startsAt,
         endsAt: deal.endsAt,
-        discountPercent: Math.round(((product.priceMin - deal.price) / product.priceMin) * 100),
+        discountPercent: this.discountPercentOf(product.priceMin, deal.price),
         flagged: !!deal.flagged,
         flagReason: deal.flagReason,
       },
@@ -419,15 +421,20 @@ export class PromotionsService {
     if (!Types.ObjectId.isValid(productId)) {
       throw new NotFoundException('Không tìm thấy sản phẩm.');
     }
-    const product = await this.productModel.findById(productId);
-    if (!product) throw new NotFoundException('Không tìm thấy sản phẩm.');
-    if (!product.activeDeal) {
+    // Atomic: điều kiện "còn khuyến mãi" nằm trong filter, tránh 2 tab admin
+    // cùng bấm "Kết thúc" trên một deal cho ra 2 thông báo/2 dòng audit log.
+    const product = await this.productModel.findOneAndUpdate(
+      { _id: productId, activeDeal: { $ne: null } },
+      { $unset: { activeDeal: '' } },
+      { new: false }, // lấy document TRƯỚC khi xoá để còn giá/lý do gắn cờ mà báo shop
+    );
+    if (!product) {
+      const exists = await this.productModel.exists({ _id: productId });
+      if (!exists) throw new NotFoundException('Không tìm thấy sản phẩm.');
       throw new BadRequestException('Sản phẩm này không có khuyến mãi nào.');
     }
 
-    const deal = product.activeDeal;
-    product.activeDeal = undefined;
-    await product.save();
+    const deal = product.activeDeal!;
 
     await this.notifications.notifyShop(product.shop, {
       type: 'promotion_ended_by_admin',
@@ -497,12 +504,16 @@ export class PromotionsService {
             price: deal.price,
             startsAt: deal.startsAt,
             endsAt: deal.endsAt,
-            discountPercent: Math.round(
-              ((p.priceMin - deal.price) / p.priceMin) * 100,
-            ),
+            discountPercent: this.discountPercentOf(p.priceMin, deal.price),
           }
         : undefined,
     };
+  }
+
+  /** Bọc chống chia-cho-0/NaN/Infinity khi `priceMin` bằng 0 hoặc âm (dữ liệu hỏng). */
+  private discountPercentOf(priceMin: number, dealPrice: number): number {
+    if (!priceMin || priceMin <= 0) return 0;
+    return Math.round(((priceMin - dealPrice) / priceMin) * 100);
   }
 
   /* ------------------------------ Hiển thị ------------------------------- */
@@ -533,9 +544,7 @@ export class PromotionsService {
             startsAt: deal.startsAt,
             endsAt: deal.endsAt,
             // Tính sẵn ở server để hai app không tự tính ra hai con số khác nhau.
-            discountPercent: Math.round(
-              ((p.priceMin - deal.price) / p.priceMin) * 100,
-            ),
+            discountPercent: this.discountPercentOf(p.priceMin, deal.price),
           }
         : undefined,
     };

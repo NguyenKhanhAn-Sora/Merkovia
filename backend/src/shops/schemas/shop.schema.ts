@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type ShopDocument = HydratedDocument<Shop>;
 
@@ -100,7 +100,7 @@ export const BankAccountSchema = SchemaFactory.createForClass(BankAccount);
 export class Shop {
   /** Chủ shop. unique → mỗi tài khoản chỉ mở được một shop. */
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'User',
     required: true,
     unique: true,

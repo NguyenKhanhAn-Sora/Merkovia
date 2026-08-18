@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type ProductDocument = HydratedDocument<Product>;
 
@@ -154,7 +154,7 @@ export class ActiveDeal {
   @Prop({ required: true })
   endsAt: Date;
 
-  @Prop({ type: Types.ObjectId, ref: 'Promotion' })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Promotion' })
   promotion?: Types.ObjectId;
 
   /**
@@ -175,7 +175,12 @@ const ActiveDealSchema = SchemaFactory.createForClass(ActiveDeal);
 
 @Schema({ timestamps: true })
 export class Product {
-  @Prop({ type: Types.ObjectId, ref: 'Shop', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Shop',
+    required: true,
+    index: true,
+  })
   shop: Types.ObjectId;
 
   @Prop({ trim: true, required: true, maxlength: 150 })
@@ -194,12 +199,17 @@ export class Product {
   description?: string;
 
   /* ------------------------------ Phân loại ------------------------------ */
-  @Prop({ type: Types.ObjectId, ref: 'Category', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Category',
+    required: true,
+    index: true,
+  })
   category: Types.ObjectId;
 
   /** Tổ tiên + chính nó → lọc cả nhánh danh mục bằng một index. */
   @Prop({
-    type: [{ type: Types.ObjectId, ref: 'Category' }],
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Category' }],
     default: [],
     index: true,
   })
@@ -307,3 +317,7 @@ ProductSchema.index({ status: 1, 'stats.sold': -1 });
 ProductSchema.index({ status: 1, 'stats.ratingAvg': -1 });
 // Tìm kiếm từ khoá trên chuỗi đã bỏ dấu.
 ProductSchema.index({ searchText: 'text' });
+// Hàng chờ kiểm duyệt admin: lọc theo trạng thái duyệt, sort theo lần sửa cuối.
+ProductSchema.index({ deletedAt: 1, 'moderation.state': 1, updatedAt: 1 });
+// Trang khuyến mãi admin: sort theo hạn kết thúc deal.
+ProductSchema.index({ 'activeDeal.endsAt': 1 });

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type PaymentDocument = HydratedDocument<Payment>;
 
@@ -58,14 +58,22 @@ export class Payment {
   @Prop({ trim: true, uppercase: true, required: true, unique: true })
   code: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  })
   buyer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, required: true, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true, index: true })
   checkoutGroup: Types.ObjectId;
 
   /** Các đơn được phiên này thanh toán. */
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Order' }], required: true })
+  @Prop({
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Order' }],
+    required: true,
+  })
   orders: Types.ObjectId[];
 
   /** Số tiền PHẢI thu, tính từ DB. Webhook báo khác số này là có vấn đề. */

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type ReviewDocument = HydratedDocument<Review>;
 
@@ -41,20 +41,35 @@ const ReviewMediaSchema = SchemaFactory.createForClass(ReviewMedia);
  */
 @Schema({ timestamps: true })
 export class Review {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  })
   buyer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Product', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Product',
+    required: true,
+    index: true,
+  })
   product: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Shop', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Shop',
+    required: true,
+    index: true,
+  })
   shop: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Order', required: true })
   order: Types.ObjectId;
 
   /** Biến thể đã mua — "size M màu đen" giúp người đọc hiểu bối cảnh. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   variant: Types.ObjectId;
 
   @Prop({ trim: true, default: '' })

@@ -287,15 +287,23 @@ export class CategoriesService implements OnModuleInit {
    * thêm/xoá danh mục trong lúc admin này đang kéo-thả trên dữ liệu cũ, tránh
    * ghi đè sai hoặc bỏ sót.
    */
-  async adminReorder(parentId: string | undefined, orderedIds: string[]) {
+  async adminReorder(
+    admin: AdminPrincipal,
+    parentId: string | undefined,
+    orderedIds: string[],
+  ) {
     const parentRef = parentId ? new Types.ObjectId(parentId) : null;
     const siblings = await this.categoryModel
       .find({ parent: parentRef })
       .select('_id');
     const actualIds = new Set(siblings.map((s) => String(s._id)));
+    // Set bỏ trùng id — nếu client gửi id lặp lại, so khớp SỐ LƯỢNG bản gốc
+    // (orderedIds.length) chứ không phải size của Set đã gộp trùng, để chặn
+    // hẳn danh sách có id lặp thay vì âm thầm chấp nhận rồi gán `order` đè.
     const givenIds = new Set(orderedIds);
     const matches =
       actualIds.size === givenIds.size &&
+      givenIds.size === orderedIds.length &&
       [...actualIds].every((id) => givenIds.has(id));
     if (!matches) {
       throw new BadRequestException(
@@ -308,6 +316,18 @@ export class CategoriesService implements OnModuleInit {
         updateOne: { filter: { _id: id }, update: { $set: { order } } },
       })),
     );
+
+    const parentLabel = parentId
+      ? ((await this.categoryModel.findById(parentId).select('name').lean())
+          ?.name ?? 'danh mục con')
+      : 'danh mục gốc';
+    await this.auditLog.log({
+      adminEmail: admin.email,
+      action: 'Sắp xếp lại danh mục',
+      targetLabel: parentLabel,
+      detail: `${orderedIds.length} mục`,
+    });
+
     return { ok: true };
   }
 

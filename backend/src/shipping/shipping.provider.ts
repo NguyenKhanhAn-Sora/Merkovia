@@ -136,18 +136,35 @@ export class TableShippingProvider extends ShippingProvider implements OnModuleI
     try {
       const doc = await this.settingsModel.findOne().lean();
       if (!doc) return; // chưa có bản ghi nào — giữ nguyên mặc định
-      this.snapshot = {
-        rates: {
-          intra_province: zoneToRate(doc.intra_province),
-          inter_province: zoneToRate(doc.inter_province),
-          long_haul: zoneToRate(doc.long_haul),
-        },
-        freeShippingThreshold: doc.freeShippingThreshold,
-        longHaulKm: doc.longHaulKm,
-      };
+      this.applySnapshot(doc);
     } catch (err: unknown) {
       this.logger.warn(`Không nạp lại được biểu cước, giữ cache cũ: ${String(err)}`);
     }
+  }
+
+  /**
+   * Gán thẳng cache từ một document đã có trong tay (VD vừa `save()` xong) —
+   * KHÔNG đọc lại DB. `ShippingSettingsService.adminUpdate` dùng cách này thay
+   * vì gọi `refreshFromDb()` để tránh race: đọc lại độc lập có thể hoàn tất
+   * KHÔNG theo đúng thứ tự các lần lưu khi 2 admin lưu gần nhau, khiến cache
+   * bị ghi đè ngược về giá trị cũ hơn dữ liệu thật trong DB.
+   */
+  applySnapshot(doc: {
+    intra_province: { base: number; perHalfKg: number; etaMinDays: number; etaMaxDays: number };
+    inter_province: { base: number; perHalfKg: number; etaMinDays: number; etaMaxDays: number };
+    long_haul: { base: number; perHalfKg: number; etaMinDays: number; etaMaxDays: number };
+    freeShippingThreshold: number;
+    longHaulKm: number;
+  }): void {
+    this.snapshot = {
+      rates: {
+        intra_province: zoneToRate(doc.intra_province),
+        inter_province: zoneToRate(doc.inter_province),
+        long_haul: zoneToRate(doc.long_haul),
+      },
+      freeShippingThreshold: doc.freeShippingThreshold,
+      longHaulKm: doc.longHaulKm,
+    };
   }
 
   quote(input: ShippingQuoteInput): ShippingQuote {

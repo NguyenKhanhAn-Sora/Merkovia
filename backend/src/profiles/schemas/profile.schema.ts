@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type ProfileDocument = HydratedDocument<Profile>;
 
@@ -13,7 +13,7 @@ export type Gender = (typeof GENDERS)[number];
 @Schema({ timestamps: true })
 export class Profile {
   @Prop({
-    type: Types.ObjectId,
+    type: MongooseSchema.Types.ObjectId,
     ref: 'User',
     required: true,
     unique: true,

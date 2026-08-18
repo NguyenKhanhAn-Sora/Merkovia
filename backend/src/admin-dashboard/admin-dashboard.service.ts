@@ -62,7 +62,10 @@ export class AdminDashboardService {
         {
           $match: {
             createdAt: { $gte: startOfToday },
-            status: { $ne: 'cancelled' },
+            // Loại `cancelled` (không phải giao dịch thật), `pending_payment`
+            // (đơn online CHƯA trả tiền, có thể không bao giờ trả — tính vào
+            // "doanh thu" là sai), và `returned` (đã hoàn tiền lại cho khách).
+            status: { $nin: ['cancelled', 'pending_payment', 'returned'] },
           },
         },
         { $group: { _id: null, total: { $sum: '$itemsTotal' } } },

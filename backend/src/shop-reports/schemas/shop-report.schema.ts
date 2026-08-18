@@ -160,5 +160,15 @@ export const ShopReportSchema = SchemaFactory.createForClass(ShopReport);
 // Hàng đợi ưu tiên: gom báo cáo đang chờ theo shop.
 ShopReportSchema.index({ shop: 1, status: 1, createdAt: -1 });
 // Chặn spam: một người chỉ được có MỘT báo cáo đang chờ cho MỘT shop tại một
-// thời điểm (`ShopReportsService.create` kiểm tra trước khi tạo).
-ShopReportSchema.index({ reporter: 1, shop: 1, status: 1 });
+// thời điểm. `ShopReportsService.create` đã kiểm tra trước khi tạo, nhưng đó
+// chỉ là kiểm tra rồi mới ghi (TOCTOU) — 2 request gửi cùng lúc vẫn có thể lọt
+// cả hai. Index UNIQUE có điều kiện này mới là chốt chặn thật ở tầng DB, giống
+// cách `Review` chặn trùng {order, variant}.
+ShopReportSchema.index(
+  { reporter: 1, shop: 1 },
+  { unique: true, partialFilterExpression: { status: 'pending' } },
+);
+// `priorityQueue()` quét TOÀN sàn (không lọc theo shop) theo status + createdAt.
+ShopReportSchema.index({ status: 1, createdAt: 1 });
+// `resolvedHistory()` quét TOÀN sàn theo status + thời điểm xử lý.
+ShopReportSchema.index({ status: 1, 'resolution.resolvedAt': -1 });

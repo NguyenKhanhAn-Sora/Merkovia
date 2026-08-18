@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CircleNotch, Envelope, FloppyDisk, Info, LockKey } from "@phosphor-icons/react";
+import { CircleNotch, FloppyDisk, Info } from "@phosphor-icons/react";
 import { PageHeader, Panel, PanelHeader, PrimaryButton } from "../../../components/dashboard/ui";
 import NumberField from "../../../components/dashboard/NumberField";
 import {
@@ -9,29 +9,6 @@ import {
   updatePlatformSettings,
   type PlatformSettings,
 } from "../../../lib/platform-settings-api";
-
-function ReadonlyField({
-  label,
-  value,
-  icon: IconCmp,
-  suffix,
-}: {
-  label: string;
-  value: string;
-  icon: typeof Envelope;
-  suffix?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <label className="text-[13px] font-medium text-star/70">{label}</label>
-      <div className="flex h-12 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-star/40">
-        <IconCmp size={17} className="shrink-0" />
-        <span className="flex-1 text-[14.5px] text-star/70">{value}</span>
-        {suffix && <span className="text-[13px] text-star/35">{suffix}</span>}
-      </div>
-    </div>
-  );
-}
 
 export default function SettingsPage() {
   const [saved, setSaved] = useState<PlatformSettings | null>(null);
@@ -61,7 +38,7 @@ export default function SettingsPage() {
   const dirty = draft && saved && JSON.stringify(draft) !== JSON.stringify(saved);
 
   async function save() {
-    if (!draft) return;
+    if (!draft || saving) return;
     setSaving(true);
     setError("");
     try {
@@ -109,17 +86,6 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          <Panel>
-            <PanelHeader
-              title="Tài khoản quản trị"
-              description="Đăng nhập bằng tài khoản cấu hình trong .env của backend."
-            />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <ReadonlyField label="Email quản trị" value="Cấu hình qua ADMIN_EMAIL" icon={Envelope} />
-              <ReadonlyField label="Mật khẩu" value="••••••••••" icon={LockKey} suffix="Đổi qua .env" />
-            </div>
-          </Panel>
-
           <Panel>
             <PanelHeader
               title="Tài chính & Đối soát"

@@ -17,18 +17,14 @@ export interface AuditLogResult {
   limit: number;
 }
 
-const EMPTY: AuditLogResult = { items: [], total: 0, page: 1, limit: 50 };
-
 export async function getAuditLog(page = 1, limit = 50, q?: string): Promise<AuditLogResult> {
-  try {
-    const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-    if (q) qs.set("q", q);
-    const res = await apiFetch(`/admin/audit-log?${qs}`);
-    if (!res.ok) return EMPTY;
-    return (await res.json()) as AuditLogResult;
-  } catch {
-    return EMPTY;
+  const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (q) qs.set("q", q);
+  const res = await apiFetch(`/admin/audit-log?${qs}`);
+  if (!res.ok) {
+    throw new Error("Không tải được nhật ký hoạt động. Vui lòng thử lại.");
   }
+  return (await res.json()) as AuditLogResult;
 }
 
 /** Nhóm các dòng log theo ngày (giờ VN) để hiển thị dạng "Hôm nay / Hôm qua / ...". */

@@ -97,7 +97,7 @@ export default function ShippingPage() {
   const dirty = draft && saved && JSON.stringify(draft) !== JSON.stringify(saved);
 
   async function save() {
-    if (!draft) return;
+    if (!draft || saving) return;
     setSaving(true);
     setError("");
     try {

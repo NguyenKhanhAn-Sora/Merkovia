@@ -76,8 +76,9 @@ export class ShippingSettingsService {
 
     // Áp dụng ngay cho những đơn đang tính cước tiếp theo — không cần khởi
     // động lại server. Đơn ĐÃ đặt giữ nguyên cước đã chốt (snapshot riêng
-    // trên `Order`), nên đổi ở đây không ảnh hưởng ngược tới đơn cũ.
-    await this.provider.refreshFromDb();
+    // trên `Order`), nên đổi ở đây không ảnh hưởng ngược tới đơn cũ. Gán thẳng
+    // từ `before` (đã lưu) thay vì đọc lại DB — tránh race đảo thứ tự.
+    this.provider.applySnapshot(before);
 
     await this.auditLog.log({
       adminEmail: admin.email,

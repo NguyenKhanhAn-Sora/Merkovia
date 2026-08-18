@@ -26,12 +26,19 @@ export default function AuditLogPage() {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await getAuditLog(1, 100, q);
-    setItems(r.items);
-    setLoading(false);
+    setError("");
+    try {
+      const r = await getAuditLog(1, 100, q);
+      setItems(r.items);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không tải được nhật ký hoạt động.");
+    } finally {
+      setLoading(false);
+    }
   }, [q]);
 
   useEffect(() => {
@@ -67,6 +74,10 @@ export default function AuditLogPage() {
         <div className="flex justify-center py-16">
           <CircleNotch size={22} className="animate-spin text-star/40" />
         </div>
+      ) : error ? (
+        <Panel>
+          <p className="py-6 text-center text-[13.5px] text-rose-300">{error}</p>
+        </Panel>
       ) : days.length === 0 ? (
         <Panel>
           <p className="py-6 text-center text-[13.5px] text-star/45">

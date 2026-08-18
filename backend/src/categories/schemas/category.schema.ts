@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type CategoryDocument = HydratedDocument<Category>;
 
@@ -20,11 +20,20 @@ export class Category {
   slug: string;
 
   /** null = danh mục gốc (cấp 0). */
-  @Prop({ type: Types.ObjectId, ref: 'Category', default: null, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Category',
+    default: null,
+    index: true,
+  })
   parent: Types.ObjectId | null;
 
   /** Toàn bộ tổ tiên từ gốc xuống, để lọc cả nhánh bằng một index. */
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Category' }], default: [], index: true })
+  @Prop({
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Category' }],
+    default: [],
+    index: true,
+  })
   ancestors: Types.ObjectId[];
 
   /** 0 = ngành hàng gốc. */

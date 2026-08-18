@@ -61,7 +61,10 @@ export class AuditLogService {
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
-      this.model.countDocuments(filter),
+      // Không tìm kiếm gì (filter rỗng) thì dùng ước lượng từ metadata collection
+      // thay vì COLLSCAN đếm thật — nhật ký hoạt động phình liên tục, số này chỉ
+      // để tham khảo chứ không quyết định logic gì.
+      term ? this.model.countDocuments(filter) : this.model.estimatedDocumentCount(),
     ]);
     return {
       items: items.map((l) => ({

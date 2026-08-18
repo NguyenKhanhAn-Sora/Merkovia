@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type PayoutDocument = HydratedDocument<Payout>;
 
@@ -55,10 +55,18 @@ export class Payout {
   @Prop({ trim: true, uppercase: true, required: true, unique: true })
   code: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'Shop', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Shop',
+    required: true,
+    index: true,
+  })
   shop: Types.ObjectId;
 
-  @Prop({ type: [{ type: Types.ObjectId, ref: 'Order' }], default: [] })
+  @Prop({
+    type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Order' }],
+    default: [],
+  })
   orders: Types.ObjectId[];
 
   /** Tổng tiền hàng của các đơn (không gồm phí vận chuyển). */

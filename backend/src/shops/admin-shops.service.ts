@@ -126,21 +126,25 @@ export class AdminShopsService {
     if (!Types.ObjectId.isValid(shopId)) {
       throw new NotFoundException('Không tìm thấy gian hàng.');
     }
-    const shop = await this.shopModel.findById(shopId);
-    if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
-    if (shop.status === 'suspended') {
+
+    // Atomic: điều kiện "chưa bị đình chỉ" nằm trong filter, tránh 2 tab admin
+    // cùng đình chỉ một shop trong cùng khoảnh khắc đọc trùng nhau.
+    const unsuspendAt = suspendDays
+      ? new Date(Date.now() + suspendDays * 86_400_000)
+      : null;
+    const shop = await this.shopModel.findOneAndUpdate(
+      { _id: shopId, status: { $ne: 'suspended' } },
+      { $set: { status: 'suspended', suspendedUntil: unsuspendAt } },
+      { new: true },
+    );
+    if (!shop) {
+      const exists = await this.shopModel.exists({ _id: shopId });
+      if (!exists) throw new NotFoundException('Không tìm thấy gian hàng.');
       throw new BadRequestException('Gian hàng này đã bị đình chỉ rồi.');
     }
-
-    shop.status = 'suspended';
     if (suspendDays) {
-      const unsuspendAt = new Date(Date.now() + suspendDays * 86_400_000);
-      shop.suspendedUntil = unsuspendAt;
-      await shop.save();
-      await this.suspension.schedule(shopId, unsuspendAt);
+      await this.suspension.schedule(shopId, unsuspendAt as Date);
     } else {
-      shop.suspendedUntil = null;
-      await shop.save();
       await this.suspension.cancel(shopId);
     }
 
@@ -189,15 +193,17 @@ export class AdminShopsService {
     if (!Types.ObjectId.isValid(shopId)) {
       throw new NotFoundException('Không tìm thấy gian hàng.');
     }
-    const shop = await this.shopModel.findById(shopId);
-    if (!shop) throw new NotFoundException('Không tìm thấy gian hàng.');
-    if (shop.status !== 'suspended') {
+
+    const shop = await this.shopModel.findOneAndUpdate(
+      { _id: shopId, status: 'suspended' },
+      { $set: { status: 'active', suspendedUntil: null } },
+      { new: true },
+    );
+    if (!shop) {
+      const exists = await this.shopModel.exists({ _id: shopId });
+      if (!exists) throw new NotFoundException('Không tìm thấy gian hàng.');
       throw new BadRequestException('Gian hàng này hiện không bị đình chỉ.');
     }
-
-    shop.status = 'active';
-    shop.suspendedUntil = null;
-    await shop.save();
     await this.suspension.cancel(shopId);
 
     await this.notifications.notifyUser(shop.owner, 'seller', {

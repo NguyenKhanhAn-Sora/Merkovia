@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type OrderDocument = HydratedDocument<Order>;
 
@@ -71,10 +71,10 @@ export type CancelledBy = (typeof CANCELLED_BY)[number];
  */
 @Schema({ _id: false })
 export class OrderItem {
-  @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Product', required: true })
   product: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   variant: Types.ObjectId;
 
   /** Slug tại thời điểm đặt — để link về trang sản phẩm nếu còn sống. */
@@ -299,10 +299,20 @@ export class Order {
   @Prop({ trim: true, uppercase: true, required: true, unique: true })
   orderCode: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true,
+  })
   buyer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Shop', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Shop',
+    required: true,
+    index: true,
+  })
   shop: Types.ObjectId;
 
   /* Bản chụp thông tin shop — đơn cũ vẫn hiện đúng tên dù shop đã đổi tên. */
@@ -313,7 +323,7 @@ export class Order {
   shopSlug?: string;
 
   /** Nhóm các đơn được tạo trong cùng một lần thanh toán. */
-  @Prop({ type: Types.ObjectId, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, index: true })
   checkoutGroup?: Types.ObjectId;
 
   @Prop({ type: [OrderItemSchema], required: true })
@@ -419,7 +429,7 @@ export class Order {
   paymentExpiresAt?: Date;
 
   /** Phiên thanh toán online đã trả cho đơn này (COD thì không có). */
-  @Prop({ type: Types.ObjectId, ref: 'Payment', index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Payment', index: true })
   payment?: Types.ObjectId;
 
   /* ------------------------- SLA xử lý của người bán --------------------- */
@@ -455,7 +465,12 @@ export class Order {
    * 🔴 Là khoá chống trả tiền hai lần: gom đơn vào payout dùng điều kiện
    * `payout: null`, nên một đơn không thể lọt vào hai đợt chi.
    */
-  @Prop({ type: Types.ObjectId, ref: 'Payout', default: null, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Payout',
+    default: null,
+    index: true,
+  })
   payout?: Types.ObjectId | null;
 
   /* ------------------------------- Khác --------------------------------- */
@@ -480,3 +495,6 @@ export const OrderSchema = SchemaFactory.createForClass(Order);
 // Danh sách đơn luôn lọc theo người mua hoặc shop rồi sắp xếp mới-nhất-trước.
 OrderSchema.index({ buyer: 1, createdAt: -1 });
 OrderSchema.index({ shop: 1, status: 1, createdAt: -1 });
+// Dashboard admin lọc theo khoảng ngày KHÔNG kèm buyer/shop (đơn hôm nay,
+// doanh thu hôm nay, tỉ lệ thành công 30 ngày, 5 đơn gần nhất toàn sàn).
+OrderSchema.index({ createdAt: -1 });
