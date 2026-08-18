@@ -29,6 +29,7 @@ import { MediaModule } from '../media/media.module';
 import { SearchModule } from '../search/search.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { FollowsModule } from '../follows/follows.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     SearchModule, // sinh vector embedding khi tạo/sửa sản phẩm
     NotificationsModule, // báo seller khi AI/admin duyệt hoặc từ chối sản phẩm
     AuditLogModule, // ghi nhật ký khi admin duyệt/từ chối sản phẩm tay
+    FollowsModule, // báo follower của shop khi có sản phẩm mới lên kệ / khuyến mãi mới
   ],
   controllers: [
     ProductsController,

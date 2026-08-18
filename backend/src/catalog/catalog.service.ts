@@ -15,6 +15,7 @@ import { buildSearchText } from '../common/text';
 import { SemanticSearchService } from '../search/semantic-search.service';
 import { ViewCounterService } from './view-counter.service';
 import { readAccessToken, scopeFromRequest } from '../common/auth-scope';
+import { FollowsService } from '../follows/follows.service';
 
 /** Sắp xếp cho người mua → điều kiện sort của Mongo. */
 const SORTS: Record<string, Record<string, 1 | -1>> = {
@@ -45,6 +46,7 @@ export class CatalogService {
     private readonly semantic: SemanticSearchService,
     private readonly viewCounter: ViewCounterService,
     private readonly jwt: JwtService,
+    private readonly follows: FollowsService,
   ) {}
 
   /**
@@ -119,6 +121,10 @@ export class CatalogService {
         ...(query.minPrice !== undefined ? { $gte: query.minPrice } : {}),
         ...(query.maxPrice !== undefined ? { $lte: query.maxPrice } : {}),
       };
+    }
+
+    if (query.minRating !== undefined) {
+      match['stats.ratingAvg'] = { $gte: query.minRating };
     }
 
     // Thứ tự theo độ liên quan ngữ nghĩa (chỉ dùng khi tìm kiếm bằng vector).
@@ -378,15 +384,19 @@ export class CatalogService {
       throw new NotFoundException('Không tìm thấy gian hàng.');
     }
 
-    const productCount = await this.productModel.countDocuments({
-      shop: shop._id,
-      ...this.visibleProductMatch,
-    });
+    const [productCount, followerCount] = await Promise.all([
+      this.productModel.countDocuments({
+        shop: shop._id,
+        ...this.visibleProductMatch,
+      }),
+      this.follows.countFollowers(shop._id),
+    ]);
 
     return {
       shop: {
         ...this.publicShop(shop),
         productCount,
+        followerCount,
         vacationMode: shop.vacationMode,
       },
     };

@@ -41,6 +41,14 @@ export class BrowseProductsDto {
   @Min(0)
   maxPrice?: number;
 
+  /** Chỉ lấy sản phẩm có điểm đánh giá trung bình >= ngưỡng này (1-5 sao). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  minRating?: number;
+
   @IsOptional()
   @IsIn(['newest', 'price_asc', 'price_desc', 'popular', 'rating'])
   sort?: string;

@@ -19,6 +19,7 @@ import { isDealLive, isDealScheduled } from './deal';
 import { PriceHistoryService } from './price-history.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { FollowsService } from '../follows/follows.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 
@@ -54,6 +55,7 @@ export class PromotionsService {
     private readonly priceHistory: PriceHistoryService,
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
+    private readonly follows: FollowsService,
   ) {}
 
   private async requireShop(user: UserDocument): Promise<ShopDocument> {
@@ -174,8 +176,23 @@ export class PromotionsService {
         `${product.priceMin.toLocaleString('vi-VN')}đ khoảng ${hoursAgo} giờ trước khi đặt khuyến mãi này.`;
     }
 
+    // "Mới" = trước đó chưa có deal nào — SỬA một deal đang chạy (đổi giá/hạn)
+    // không tính, để không báo follower liên tục vì một chỉnh sửa nhỏ.
+    const isNewDeal = !product.activeDeal;
+
     product.activeDeal = { price: dto.price, startsAt, endsAt, flagged, flagReason };
     await product.save();
+
+    // Chỉ báo follower khi deal ĐANG SỐNG ngay lúc đặt (không phải đặt lịch
+    // cho tương lai) — "vừa có khuyến mãi" mà thật ra vài tháng nữa mới chạy
+    // thì gây hiểu lầm.
+    if (isNewDeal && isDealLive(product.activeDeal)) {
+      await this.follows.notifyNewPromotion(product.shop, {
+        id: product._id,
+        name: product.name,
+        slug: product.slug,
+      });
+    }
 
     return { product: this.publicDeal(product) };
   }

@@ -15,6 +15,7 @@ import {
 import { Shop, ShopDocument } from '../shops/schemas/shop.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { FollowsService } from '../follows/follows.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 
 /** Tối đa số ảnh gửi cho AI mỗi lượt xét — vừa đủ để nhận diện vi phạm, vừa giữ chi phí/độ trễ trong tầm. */
@@ -51,6 +52,7 @@ export class ProductModerationService {
     @InjectModel(Shop.name) private readonly shopModel: Model<ShopDocument>,
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
+    private readonly follows: FollowsService,
   ) {}
 
   private isEnabled(): boolean {
@@ -93,6 +95,8 @@ export class ProductModerationService {
       await this.applyVerdict(
         product._id,
         product.shop,
+        product.name,
+        product.slug,
         verdict.approved ? 'approve' : 'reject',
         verdict.reason,
         'ai',
@@ -263,11 +267,23 @@ Trả lời bằng tiếng Việt, ngắn gọn, đúng định dạng JSON yêu
   private async applyVerdict(
     productId: Types.ObjectId,
     shopId: Types.ObjectId,
+    productName: string,
+    productSlug: string | undefined,
     verdict: 'approve' | 'reject',
     reason: string | undefined,
     decidedBy: 'ai' | 'admin',
     extra: { aiModel?: string; adminEmail?: string },
   ): Promise<void> {
+    // Kiểm tra TRƯỚC khi ghi log của lượt duyệt này — "lần đầu duyệt" nghĩa là
+    // chưa từng có dòng `verdict: 'approve'` nào cho sản phẩm này, tức đây là
+    // lần ĐẦU TIÊN sản phẩm thật sự lên kệ trước mắt buyer. Sản phẩm bị từ
+    // chối rồi sửa lại và duyệt sau đó vẫn tính là "lần đầu" (buyer chưa từng
+    // thấy); sản phẩm ĐÃ duyệt rồi bị sửa nội dung phải duyệt lại thì KHÔNG
+    // báo follower lần hai — tránh làm phiền vì một chỉnh sửa nhỏ.
+    const isFirstApproval =
+      verdict === 'approve' &&
+      !(await this.logModel.exists({ product: productId, verdict: 'approve' }));
+
     const state = verdict === 'approve' ? 'ok' : 'rejected';
     await this.productModel.updateOne(
       { _id: productId },
@@ -292,6 +308,14 @@ Trả lời bằng tiếng Việt, ngắn gọn, đúng định dạng JSON yêu
       adminEmail: extra.adminEmail,
     });
     await this.notifySeller(shopId, verdict, reason);
+
+    if (isFirstApproval) {
+      await this.follows.notifyNewProduct(shopId, {
+        id: productId,
+        name: productName,
+        slug: productSlug,
+      });
+    }
   }
 
   private async notifySeller(
@@ -443,13 +467,15 @@ Trả lời bằng tiếng Việt, ngắn gọn, đúng định dạng JSON yêu
     }
     const product = await this.productModel
       .findById(productId)
-      .select('shop name')
+      .select('shop name slug')
       .lean();
     if (!product) throw new NotFoundException('Không tìm thấy sản phẩm.');
 
     await this.applyVerdict(
       product._id,
       product.shop,
+      product.name,
+      product.slug,
       action,
       reason?.trim(),
       'admin',

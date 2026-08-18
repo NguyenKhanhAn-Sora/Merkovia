@@ -62,6 +62,9 @@ export const NOTIF_TYPES = [
   'review_reply_unhidden',
   /** Admin kết thúc sớm khuyến mãi của shop (thường do nghi ngờ giá ảo) — xem `PromotionsService.adminEndDeal`. */
   'promotion_ended_by_admin',
+  /** Gửi cho buyer ĐANG THEO DÕI một shop khi shop đó có sản phẩm mới lên kệ (lần đầu qua kiểm duyệt) hoặc bắt đầu một khuyến mãi mới — xem `FollowsService`. */
+  'shop_new_product',
+  'shop_new_promotion',
 ] as const;
 export type NotifType = (typeof NOTIF_TYPES)[number];
 

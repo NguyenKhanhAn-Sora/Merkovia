@@ -33,6 +33,7 @@ import { AdminUsersModule } from './users/admin-users.module';
 import { AdminShopsModule } from './shops/admin-shops.module';
 import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { BannersModule } from './banners/banners.module';
+import { FollowsModule } from './follows/follows.module';
 import { config } from './config/config';
 
 @Module({
@@ -70,6 +71,7 @@ import { config } from './config/config';
     AdminShopsModule,
     PlatformSettingsModule,
     BannersModule,
+    FollowsModule,
   ],
   controllers: [AppController],
   // Đếm theo phiên đăng nhập, không theo IP — nhiều người dùng chung một IP
