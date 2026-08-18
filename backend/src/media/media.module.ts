@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { AuthModule } from '../auth/auth.module';
+import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 
 @Module({
-  // Cần `JwtAuthGuard` để chặn người lạ đẩy file lên kho.
-  imports: [AuthModule],
+  // `JwtAuthGuard` chặn người lạ đẩy file lên kho (buyer/seller); `AdminAuthGuard`
+  // cho route banner (chỉ admin).
+  imports: [AuthModule, AdminAuthModule],
   controllers: [MediaController],
   providers: [MediaService],
   exports: [MediaService],

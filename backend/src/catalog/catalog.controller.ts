@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { CatalogService } from './catalog.service';
 import { BrowseProductsDto } from './dto/browse-products.dto';
+import { BannersService } from '../banners/banners.service';
 
 /**
  * Dữ liệu công khai cho trang người mua — KHÔNG cần đăng nhập.
@@ -11,7 +12,10 @@ import { BrowseProductsDto } from './dto/browse-products.dto';
  */
 @Controller('catalog')
 export class CatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(
+    private readonly catalog: CatalogService,
+    private readonly bannersService: BannersService,
+  ) {}
 
   @Get('products')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
@@ -23,6 +27,12 @@ export class CatalogController {
   @Get('categories')
   categories() {
     return this.catalog.categoriesWithCounts();
+  }
+
+  /** Banner carousel trang chủ — chỉ banner admin đang bật. */
+  @Get('banners')
+  banners() {
+    return this.bannersService.publicList();
   }
 
   @Get('products/:slug')

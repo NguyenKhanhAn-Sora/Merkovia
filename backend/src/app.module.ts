@@ -32,6 +32,7 @@ import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { AdminUsersModule } from './users/admin-users.module';
 import { AdminShopsModule } from './shops/admin-shops.module';
 import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
+import { BannersModule } from './banners/banners.module';
 import { config } from './config/config';
 
 @Module({
@@ -68,6 +69,7 @@ import { config } from './config/config';
     AdminUsersModule,
     AdminShopsModule,
     PlatformSettingsModule,
+    BannersModule,
   ],
   controllers: [AppController],
   // Đếm theo phiên đăng nhập, không theo IP — nhiều người dùng chung một IP

@@ -7,6 +7,7 @@ import { ProductsModule } from '../products/products.module';
 import { ShopsModule } from '../shops/shops.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { SearchModule } from '../search/search.module';
+import { BannersModule } from '../banners/banners.module';
 import { config } from '../config/config';
 
 /** Mặt tiền công khai của sàn: duyệt sản phẩm, xem gian hàng, danh mục. */
@@ -16,6 +17,7 @@ import { config } from '../config/config';
     ShopsModule,
     CategoriesModule,
     SearchModule,
+    BannersModule,
     // Để đọc (tùy chọn) phiên đăng nhập của người xem khi đếm view.
     JwtModule.register({ secret: config.jwt.secret }),
   ],

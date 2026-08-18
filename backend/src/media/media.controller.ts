@@ -12,6 +12,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminAuthGuard } from '../admin-auth/admin-auth.guard';
 
 const MB = 1024 * 1024;
 
@@ -127,6 +128,35 @@ export class MediaController {
     return this.media.upload(
       { buffer: file.buffer, mimetype: file.mimetype },
       'reports',
+    );
+  }
+
+  /**
+   * Ảnh banner carousel trang chủ. Chỉ admin — khác mọi route upload khác ở
+   * trên (đều dành cho buyer/seller), banner là nội dung admin toàn quyền
+   * kiểm soát, không có phía nào khác được đẩy ảnh vào đây.
+   *
+   * Hạn mức cao hơn `/media/image` (10MB thay vì 5MB): route này nhận CẢ ảnh
+   * đã cắt (nhẹ, luôn cỡ 1600×500) LẪN ảnh gốc chưa cắt admin tải lên (có thể
+   * là file thiết kế gốc độ phân giải cao) — xem `BannerFormModal.tsx`.
+   */
+  @Post('banner')
+  @UseGuards(AdminAuthGuard)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * MB } }))
+  uploadBanner(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 10 * MB }),
+          new FileTypeValidator({ fileType: /image\/(png|jpe?g|webp)/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.media.upload(
+      { buffer: file.buffer, mimetype: file.mimetype },
+      'banners',
     );
   }
 }
