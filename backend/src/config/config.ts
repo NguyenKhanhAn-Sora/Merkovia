@@ -177,13 +177,20 @@ export const config = {
     /**
      * Model đa phương thức (ảnh + văn bản) dùng để kiểm duyệt sản phẩm tự động
      * — xem `ProductModerationService`. Cần bản Flash trở lên để hiểu ảnh.
+     *
+     * 🔴 CỐ Ý KHÔNG dùng alias `gemini-flash-latest`: tại thời điểm viết, alias
+     * này trỏ tới `gemini-3.7-flash` (bản preview) — free tier CHỈ 20
+     * request/NGÀY (không phải theo phút), test vài chục lượt là hết sạch cả
+     * ngày, ảnh hưởng lây sang mọi tính năng dùng chung alias. Ghim thẳng
+     * `gemini-2.5-flash` (bản ổn định) để có hạn mức free tier thực dùng được.
      */
-    moderationModel: optional('GEMINI_MODERATION_MODEL', 'gemini-flash-latest'),
+    moderationModel: optional('GEMINI_MODERATION_MODEL', 'gemini-2.5-flash'),
     /**
      * Model dùng cho trợ lý AI chatbot (buyer/seller) — cần hỗ trợ
      * function-calling để tra dữ liệu thật thay vì bịa. Xem `AiChatService`.
+     * Cùng lý do ghim `gemini-2.5-flash` như `moderationModel` ở trên.
      */
-    chatModel: optional('GEMINI_CHAT_MODEL', 'gemini-flash-latest'),
+    chatModel: optional('GEMINI_CHAT_MODEL', 'gemini-2.5-flash'),
     baseUrl: optional(
       'GEMINI_BASE_URL',
       'https://generativelanguage.googleapis.com/v1beta',
