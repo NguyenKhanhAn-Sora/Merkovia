@@ -35,10 +35,29 @@ export class CatalogController {
     return this.bannersService.publicList();
   }
 
+  /**
+   * Sản phẩm theo danh sách id, GIỮ NGUYÊN thứ tự truyền vào — dùng cho "Đã
+   * xem gần đây" (frontend lưu id ở localStorage). Đăng ký TRƯỚC `products/:slug`
+   * để NestJS không hiểu nhầm "by-ids" là một giá trị slug.
+   */
+  @Get('products/by-ids')
+  @Throttle({ default: { limit: 90, ttl: 60_000 } })
+  productsByIds(@Query('ids') ids?: string) {
+    const list = (ids ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    return this.catalog.productsByIds(list);
+  }
+
   @Get('products/:slug')
   @Throttle({ default: { limit: 90, ttl: 60_000 } })
   product(@Param('slug') slug: string, @Req() req: Request) {
     return this.catalog.productBySlug(slug, req);
+  }
+
+  /** Sản phẩm liên quan hiển thị ở trang chi tiết sản phẩm. */
+  @Get('products/:slug/related')
+  @Throttle({ default: { limit: 90, ttl: 60_000 } })
+  related(@Param('slug') slug: string) {
+    return this.catalog.relatedProducts(slug);
   }
 
   @Get('shops/:slug')

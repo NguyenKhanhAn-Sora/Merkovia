@@ -280,6 +280,121 @@ export class CatalogService {
     };
   }
 
+  /**
+   * Sản phẩm ứng với một danh sách id CHO SẴN, giữ NGUYÊN thứ tự đã truyền vào
+   * (id nào không còn hiển thị công khai thì tự rớt khỏi kết quả, không báo
+   * lỗi) — dùng cho "Đã xem gần đây" (frontend lưu id ở localStorage, gọi lại
+   * đây để lấy giá/tồn kho MỚI NHẤT thay vì tin dữ liệu cũ trong trình duyệt).
+   */
+  async productsByIds(rawIds: string[], limit = 20) {
+    const ids = rawIds
+      .filter((id) => Types.ObjectId.isValid(id))
+      .slice(0, limit)
+      .map((id) => new Types.ObjectId(id));
+    const items = await this.cardsForIds(ids);
+    return { items };
+  }
+
+  /**
+   * Sản phẩm gần giống một sản phẩm — ưu tiên NGỮ NGHĨA (tái dùng thẳng vector
+   * đã có sẵn của chính sản phẩm, không tốn thêm lượt gọi Gemini). Sản phẩm
+   * chưa có embedding (Gemini tắt/lỗi lúc đăng) thì lui về CÙNG DANH MỤC.
+   */
+  async relatedProducts(slug: string, limit = 10) {
+    const product = await this.productModel
+      .findOne({ slug, ...this.visibleProductMatch })
+      .select('+embedding embeddingModel category')
+      .lean();
+    if (!product) return { items: [] };
+
+    if (product.embedding?.length && product.embeddingModel === config.gemini.embedModel) {
+      const similarIds = await this.semantic.rankSimilar(product.embedding, product._id, limit);
+      if (similarIds.length) return { items: await this.cardsForIds(similarIds) };
+    }
+
+    const fallback = await this.productModel
+      .find({ _id: { $ne: product._id }, category: product.category, ...this.visibleProductMatch })
+      .sort({ 'stats.sold': -1, createdAt: -1 })
+      .limit(limit)
+      .select('_id')
+      .lean();
+    return { items: await this.cardsForIds(fallback.map((p) => p._id)) };
+  }
+
+  /** Dựng thẻ sản phẩm (giống hình dạng `browse()` trả) từ một danh sách id, giữ nguyên thứ tự truyền vào. */
+  private async cardsForIds(ids: Types.ObjectId[]) {
+    if (!ids.length) return [];
+    const pipeline: PipelineStage[] = [
+      { $match: { _id: { $in: ids }, ...this.visibleProductMatch } },
+      {
+        $lookup: {
+          from: 'shops',
+          localField: 'shop',
+          foreignField: '_id',
+          as: 'shopDoc',
+        },
+      },
+      { $unwind: '$shopDoc' },
+      {
+        $match: {
+          'shopDoc.status': 'active',
+          'shopDoc.vacationMode': { $ne: true },
+        },
+      },
+      {
+        $project: {
+          name: 1,
+          slug: 1,
+          images: { $slice: ['$images', 1] },
+          'variants.image': 1,
+          priceMin: 1,
+          priceMax: 1,
+          totalStock: 1,
+          activeDeal: 1,
+          stats: 1,
+          'shopDoc.name': 1,
+          'shopDoc.slug': 1,
+          'shopDoc.logoUrl': 1,
+        },
+      },
+    ];
+    const rows = (await this.productModel.aggregate(pipeline)) as Record<
+      string,
+      any
+    >[];
+    const cards = new Map(
+      rows.map((p) => [
+        String(p._id),
+        {
+          id: String(p._id),
+          slug: p.slug as string,
+          name: p.name as string,
+          image:
+            p.images?.[0]?.url ??
+            (p.variants as { image?: string }[] | undefined)?.find(
+              (v) => v.image,
+            )?.image,
+          priceMin: p.priceMin as number,
+          priceMax: p.priceMax as number,
+          deal: this.publicDeal(p.activeDeal),
+          inStock: (p.totalStock ?? 0) > 0,
+          sold: p.stats?.sold ?? 0,
+          ratingAvg: p.stats?.ratingAvg ?? 0,
+          ratingCount: p.stats?.ratingCount ?? 0,
+          shop: {
+            name: p.shopDoc?.name,
+            slug: p.shopDoc?.slug,
+            logoUrl: p.shopDoc?.logoUrl,
+          },
+        },
+      ]),
+    );
+    // Aggregate không giữ thứ tự $in — xếp lại đúng thứ tự đã truyền vào.
+    return ids
+      .map((id) => cards.get(String(id)))
+      .filter((c): c is NonNullable<typeof c> => !!c);
+  }
+
   /* ------------------------------ Chi tiết ------------------------------- */
 
   async productBySlug(slug: string, req?: Request) {

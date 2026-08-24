@@ -118,6 +118,54 @@ export class SemanticSearchService {
     return scored.slice(0, this.CANDIDATE_LIMIT).map((s) => s.id);
   }
 
+  /**
+   * Sản phẩm gần giống một sản phẩm CHO SẴN (dùng cho "Sản phẩm liên quan") —
+   * tái dùng THẲNG vector đã có sẵn của chính sản phẩm đó, KHÔNG gọi Gemini
+   * lần nữa (khác `rankIds` phải nhúng một câu truy vấn mới). Cùng ngưỡng
+   * tuyệt đối/tương đối với `rankIds` để "liên quan" nghĩa giống nhau ở mọi nơi.
+   */
+  async rankSimilar(
+    vector: number[],
+    excludeId: Types.ObjectId,
+    limit = 10,
+  ): Promise<Types.ObjectId[]> {
+    if (!vector?.length) return [];
+
+    let candidates: Candidate[];
+    try {
+      candidates = await this.loadCandidates();
+    } catch (err) {
+      this.logger.warn(
+        `Nạp ứng viên embedding lỗi: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
+    if (!candidates.length) return [];
+
+    const qNorm = Math.sqrt(vector.reduce((s, v) => s + v * v, 0));
+    if (qNorm === 0) return [];
+
+    const excludeKey = String(excludeId);
+    const raw: { id: Types.ObjectId; cosine: number }[] = [];
+    let topCosine = -Infinity;
+    for (const c of candidates) {
+      if (String(c.id) === excludeKey) continue; // loại chính sản phẩm đang xem
+      if (c.vector.length !== vector.length || c.norm === 0) continue;
+      const cosine = dot(vector, c.vector) / (qNorm * c.norm);
+      if (cosine < this.MIN_SCORE) continue;
+      if (cosine > topCosine) topCosine = cosine;
+      raw.push({ id: c.id, cosine });
+    }
+    if (!raw.length) return [];
+
+    const cutoff = topCosine * this.RELATIVE_RATIO;
+    return raw
+      .filter((r) => r.cosine >= cutoff)
+      .sort((a, b) => b.cosine - a.cosine)
+      .slice(0, limit)
+      .map((r) => r.id);
+  }
+
   /** Cộng điểm theo tỉ lệ từ khoá xuất hiện trong searchText (đã bỏ dấu). */
   private keywordBonus(qWords: string[], searchText: string): number {
     if (!qWords.length || !searchText) return 0;
