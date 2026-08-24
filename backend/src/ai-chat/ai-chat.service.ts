@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { Model, Types } from 'mongoose';
 import { config } from '../config/config';
 import {
   AiChatMessage,
@@ -15,6 +16,17 @@ import { CatalogService } from '../catalog/catalog.service';
 import type { BrowseProductsDto } from '../catalog/dto/browse-products.dto';
 import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
 import { FollowsService } from '../follows/follows.service';
+
+/**
+ * Hạn lưu lịch sử chat AI — RIÊNG cho từng người, tính từ tin ĐẦU TIÊN của
+ * chính họ (không phải mốc chung cho cả server, càng không phải cắt tỉa từng
+ * tin lẻ theo tuổi). Một khi hội thoại của một (user, scope) đã "sống" quá
+ * bấy nhiêu ngày kể từ tin cũ nhất còn lưu, xoá TRỌN hội thoại đó — tin nhắn
+ * kế tiếp của họ tự nhiên trở thành khởi đầu mới, đồng hồ tính lại từ đầu.
+ * Đỡ tải DB/tránh phình dữ liệu vô thời hạn cho một tính năng vốn chỉ cần
+ * ngữ cảnh gần nhất.
+ */
+export const AI_CHAT_HISTORY_RETENTION_DAYS = 3;
 
 const MAX_HISTORY = 20;
 /** Chặn vòng lặp gọi tool vô hạn — đủ cho vài bước tra cứu nối tiếp nhau. */
@@ -536,5 +548,45 @@ QUY TẮC BẮT BUỘC:
       total: order.total,
       buyerId: order.buyerId,
     };
+  }
+
+  /* ------------------------------ Dọn định kỳ ------------------------------ */
+
+  /**
+   * Xoá TRỌN hội thoại của những (user, scope) mà tin CŨ NHẤT đã quá hạn lưu —
+   * không đụng tới hội thoại còn "trẻ" dù có bao nhiêu tin. Hai bước: (1) gom
+   * nhóm theo (user, scope) tìm tin cũ nhất mỗi nhóm, (2) xoá hết tin của
+   * đúng những nhóm đã quá hạn.
+   */
+  async purgeOldHistory(): Promise<{ purgedMessages: number; purgedConversations: number }> {
+    const cutoff = new Date(Date.now() - AI_CHAT_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+
+    const staleGroups = await this.messageModel.aggregate<{
+      _id: { user: Types.ObjectId; scope: AppScope };
+      oldest: Date;
+    }>([
+      { $group: { _id: { user: '$user', scope: '$scope' }, oldest: { $min: '$createdAt' } } },
+      { $match: { oldest: { $lt: cutoff } } },
+    ]);
+
+    if (staleGroups.length === 0) return { purgedMessages: 0, purgedConversations: 0 };
+
+    const res = await this.messageModel.deleteMany({
+      $or: staleGroups.map((g) => ({ user: g._id.user, scope: g._id.scope })),
+    });
+    this.logger.log(
+      `Đã xoá ${res.deletedCount} tin (${staleGroups.length} hội thoại) quá ${AI_CHAT_HISTORY_RETENTION_DAYS} ngày kể từ tin đầu tiên.`,
+    );
+    return { purgedMessages: res.deletedCount, purgedConversations: staleGroups.length };
+  }
+
+  /** Chạy mỗi ngày lúc 3h sáng — giờ thấp điểm, cùng khung với dọn thùng rác sản phẩm. */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async handleHistoryCleanup() {
+    try {
+      await this.purgeOldHistory();
+    } catch (err) {
+      this.logger.error('Dọn lịch sử chat AI thất bại', err as Error);
+    }
   }
 }

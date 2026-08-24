@@ -13,6 +13,7 @@ import { BrowseProductsDto } from './dto/browse-products.dto';
 import { isDealLive } from '../products/deal';
 import { buildSearchText } from '../common/text';
 import { SemanticSearchService } from '../search/semantic-search.service';
+import { config } from '../config/config';
 import { ViewCounterService } from './view-counter.service';
 import { readAccessToken, scopeFromRequest } from '../common/auth-scope';
 import { FollowsService } from '../follows/follows.service';
@@ -144,11 +145,24 @@ export class CatalogService {
         relevanceIds = ranked;
         // 🔴 HỢP tập ngữ nghĩa VỚI khớp từ khoá: hàng CHƯA có embedding (Gemini
         // lỗi/quota, vector sinh trễ) hay khớp đúng tên vẫn hiện — không "biến
-        // mất" khỏi tìm kiếm. Vẫn lọc được ngành lạc đề vì truy vấn mô tả hiếm
-        // khi khớp ĐỦ mọi từ khoá nên không kéo rác về.
+        // mất" khỏi tìm kiếm.
+        //
+        // 🔴 NHƯNG chỉ "vớt" hàng CHƯA có embedding hợp lệ — hàng ĐÃ có embedding
+        // nghĩa là ngữ nghĩa đã CHẤM ĐIỂM RỒI và cố tình loại (dưới ngưỡng liên
+        // quan) không được phép lách lại qua nhánh từ khoá chỉ vì `searchText`
+        // (gồm cả MÔ TẢ dài) tình cờ chứa đủ các từ ở đâu đó — vd tìm "chuột máy
+        // tính" vẫn ra một cái laptop chỉ vì mô tả có nhắc "tặng kèm chuột quang
+        // ngoài". Đây là hàng thật đã bị test bắt được, không phải giả định.
+        const notYetEmbedded = {
+          $or: [
+            { embeddingModel: { $ne: config.gemini.embedModel } },
+            { embedding: { $exists: false } },
+            { embedding: { $size: 0 } },
+          ],
+        };
         match.$or = [
           { _id: { $in: ranked } },
-          ...(keywordAnd ? [{ $and: keywordAnd }] : []),
+          ...(keywordAnd ? [{ $and: [...keywordAnd, notYetEmbedded] }] : []),
         ];
       } else if (keywordAnd) {
         // Ngữ nghĩa tắt / không ra kết quả → thuần từ khoá như cũ.
