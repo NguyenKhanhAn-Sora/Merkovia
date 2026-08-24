@@ -9,4 +9,5 @@ và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, 
 - mỗi account nên dùng unique số điện thoại không hay 1 số điện thoại có thể dùng cho nhiều tài khoản thì phù hợp
 - theo bạn có nên xây dựng cho buyer 1 ví tích trữ số tiền như 1 tài khoản ngân hàng 
 để nhận tiền hoàn trả lại hay là mỗi khi hoàn tiền về cho buyer thì hoàn về thẳng 
-stk ngân hàng của buyer đó luôn?
+stk ngân hàng của buyer đó luôn?`
+- làm tính năng chat CSKH

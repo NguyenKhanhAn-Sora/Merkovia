@@ -25,5 +25,8 @@ import { config } from '../config/config';
   ],
   controllers: [CatalogController],
   providers: [CatalogService, ViewCounterService],
+  // Mở CatalogService ra ngoài để AiChatModule tra sản phẩm/gian hàng công
+  // khai khi trả lời buyer/seller (không đụng schema, chỉ dùng lại service).
+  exports: [CatalogService],
 })
 export class CatalogModule {}

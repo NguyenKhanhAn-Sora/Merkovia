@@ -179,6 +179,11 @@ export const config = {
      * — xem `ProductModerationService`. Cần bản Flash trở lên để hiểu ảnh.
      */
     moderationModel: optional('GEMINI_MODERATION_MODEL', 'gemini-flash-latest'),
+    /**
+     * Model dùng cho trợ lý AI chatbot (buyer/seller) — cần hỗ trợ
+     * function-calling để tra dữ liệu thật thay vì bịa. Xem `AiChatService`.
+     */
+    chatModel: optional('GEMINI_CHAT_MODEL', 'gemini-flash-latest'),
     baseUrl: optional(
       'GEMINI_BASE_URL',
       'https://generativelanguage.googleapis.com/v1beta',

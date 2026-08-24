@@ -34,6 +34,7 @@ import { AdminShopsModule } from './shops/admin-shops.module';
 import { PlatformSettingsModule } from './platform-settings/platform-settings.module';
 import { BannersModule } from './banners/banners.module';
 import { FollowsModule } from './follows/follows.module';
+import { AiChatModule } from './ai-chat/ai-chat.module';
 import { config } from './config/config';
 
 @Module({
@@ -72,6 +73,7 @@ import { config } from './config/config';
     PlatformSettingsModule,
     BannersModule,
     FollowsModule,
+    AiChatModule,
   ],
   controllers: [AppController],
   // Đếm theo phiên đăng nhập, không theo IP — nhiều người dùng chung một IP
