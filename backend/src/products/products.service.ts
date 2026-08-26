@@ -484,11 +484,34 @@ export class ProductsService {
     if (dto.description !== undefined) {
       product.description = dto.description.trim() || undefined;
     }
-    if (dto.images !== undefined) product.images = dto.images;
+
+    /**
+     * Ảnh/video bị THAY hoặc GỠ ở lần sửa này — key của chúng phải dọn khỏi
+     * R2 sau khi lưu thành công, nếu không file mồ côi nằm lại trong bucket
+     * VĨNH VIỄN (DB không còn tham chiếu, nhưng chưa từng có chỗ nào gọi
+     * `media.delete()` ngoài lúc xoá hẳn sản phẩm ở thùng rác — sửa ảnh 50 lần
+     * là tốn phí lưu trữ 50 lần). Phải chụp lại danh sách key cũ TRƯỚC khi ghi
+     * đè `product.images`/`product.video`.
+     */
+    const removedMediaKeys: string[] = [];
+    if (dto.images !== undefined) {
+      const nextKeys = new Set(
+        dto.images.map((i) => i.key).filter((k): k is string => !!k),
+      );
+      for (const img of product.images) {
+        if (img.key && !nextKeys.has(img.key)) removedMediaKeys.push(img.key);
+      }
+      product.images = dto.images;
+    }
     // Kiểm TRẠNG THÁI CUỐI (sau khi áp mọi thay đổi) — ảnh chung hoặc phân
     // loại đổi ở request này đều phải giữ cho sản phẩm còn ít nhất 1 ảnh.
     this.assertHasImage(product.images, product.variants);
-    if (dto.video !== undefined) product.video = dto.video;
+    if (dto.video !== undefined) {
+      if (product.video?.key && product.video.key !== dto.video?.key) {
+        removedMediaKeys.push(product.video.key);
+      }
+      product.video = dto.video;
+    }
     if (dto.attributes !== undefined) product.attributes = dto.attributes;
     if (dto.shipping !== undefined) {
       product.shipping = { ...product.shipping, ...dto.shipping };
@@ -524,6 +547,19 @@ export class ProductsService {
       this.scheduleEmbedding(product, categoryName);
     }
     if (shouldQueueReview) this.moderation.queueReview(product._id);
+
+    // Xoá sau khi lưu THÀNH CÔNG — lỡ `assertHasImage`/validate ném lỗi ở
+    // trên thì chưa đụng gì tới R2. Từng key lỗi không chặn các key còn lại
+    // (giống `purgeExpiredTrash`), vì đây là dọn dẹp phụ, không phải nghiệp vụ
+    // chính của request.
+    for (const key of removedMediaKeys) {
+      try {
+        await this.media.delete(key);
+      } catch (err: unknown) {
+        this.logger.warn(`Không xoá được ảnh/video cũ trên R2 "${key}": ${String(err)}`);
+      }
+    }
+
     return { ok: true };
   }
 

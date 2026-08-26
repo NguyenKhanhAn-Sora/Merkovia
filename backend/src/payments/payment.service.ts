@@ -506,18 +506,61 @@ export class PaymentService {
   }): Promise<void> {
     const note = `Đơn ${input.orderCode} đã huỷ (${input.reason}) — cần hoàn ${input.amount.toLocaleString('vi-VN')}đ.`;
     try {
-      const payment = await this.paymentModel.findById(input.paymentId);
-      // Chưa thu được tiền thì không có gì để hoàn.
-      if (!payment || payment.status !== 'paid') return;
-
-      payment.needsRefund = true;
-      payment.refundReason = payment.refundReason
-        ? `${payment.refundReason} | ${note}`
-        : note;
-      await payment.save();
+      /**
+       * 🔴 Atomic bằng update dạng PIPELINE, không phải `find` + sửa + `save()`.
+       *
+       * Hai lý do bắt buộc:
+       *  1. Một `Payment` trả cho NHIỀU đơn (giỏ nhiều gian hàng) — huỷ vài đơn
+       *     gần như cùng lúc là chuyện bình thường. Đọc-sửa-lưu tuần tự thì lần
+       *     ghi sau có thể ĐÈ MẤT `refundReason` của lần ghi trước (mất bản ghi
+       *     nợ, không phải chỉ mất chữ).
+       *  2. `refundReason` giới hạn 300 ký tự ở schema. Lý do huỷ của người mua
+       *     được phép dài tới 300 ký tự, cộng thêm phần khung câu thì DỄ VƯỢT
+       *     300 — `save()` khi đó ném `ValidationError`, rơi vào catch bên dưới,
+       *     và `needsRefund` — cờ DUY NHẤT theo dõi khoản nợ này — KHÔNG BAO GIỜ
+       *     được ghi. Tiền của khách biến mất khỏi mọi báo cáo trong im lặng.
+       *     `$substrCP` cắt về đúng 300 ký tự NGAY TRONG câu lệnh, nên không có
+       *     đường nào để việc đánh dấu nợ thất bại chỉ vì ghi chú dài.
+       */
+      const res = await this.paymentModel.updateOne(
+        { _id: input.paymentId, status: 'paid' },
+        [
+          {
+            $set: {
+              needsRefund: true,
+              refundReason: {
+                $substrCP: [
+                  {
+                    $concat: [
+                      { $ifNull: ['$refundReason', ''] },
+                      {
+                        $cond: [
+                          { $eq: [{ $ifNull: ['$refundReason', ''] }, ''] },
+                          '',
+                          ' | ',
+                        ],
+                      },
+                      note,
+                    ],
+                  },
+                  0,
+                  300,
+                ],
+              },
+            },
+          },
+        ],
+        // Mongoose (9.x) từ chối nhận mảng (update dạng pipeline) trừ khi bật
+        // rõ ràng cờ này — không có nó, `updateOne` ném lỗi ngay từ phía
+        // client, không phải MongoDB.
+        { updatePipeline: true },
+      );
+      // Chưa thu được tiền (chưa `paid`) hoặc phiên không tồn tại thì không có
+      // gì để hoàn — không phải lỗi, chỉ đơn giản là không khớp điều kiện.
+      if (res.matchedCount === 0) return;
 
       // Ghi to vào log: đây là tiền thật của người khác đang nằm ở chỗ mình.
-      this.logger.error(`CẦN HOÀN TIỀN — phiên ${payment.code}: ${note}`);
+      this.logger.error(`CẦN HOÀN TIỀN — phiên ${String(input.paymentId)}: ${note}`);
     } catch (err: unknown) {
       // Không được làm hỏng việc huỷ đơn: kho đã hoàn, đơn đã đóng.
       this.logger.error(

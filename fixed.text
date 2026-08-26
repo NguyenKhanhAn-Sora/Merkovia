@@ -11,3 +11,5 @@ và in hoá đơn sản phẩm của chúng ta để dán lên hàng hoá ấy, 
 để nhận tiền hoàn trả lại hay là mỗi khi hoàn tiền về cho buyer thì hoàn về thẳng 
 stk ngân hàng của buyer đó luôn?`
 - làm tính năng chat CSKH
+- kiểm tra lại toan bộ hệ thống 1 lần để đảm bảo không có lỗi nàow
+- kiểm tra xem có hardcode domain của trang web ở đâu không, thay bằng biến trong .env để sau này tiện thay đổi khi lên production

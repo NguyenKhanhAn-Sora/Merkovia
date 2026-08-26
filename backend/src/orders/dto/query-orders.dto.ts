@@ -8,8 +8,6 @@ import {
   Max,
   MaxLength,
   Min,
-  MinLength,
-  ValidateIf,
 } from 'class-validator';
 import { CANCEL_REASONS, ORDER_STATUS } from '../schemas/order.schema';
 
@@ -52,12 +50,22 @@ export class CancelOrderDto {
   reasonType?: (typeof CANCEL_REASONS)[number];
 
   /**
-   * Nội dung tự nhập. BẮT BUỘC khi chọn "Khác" (other) — chọn nhãn khác thì bỏ
-   * qua (ô nhập phía client đã chặn tối đa 300 ký tự cho phần ghi chú thêm).
+   * Nội dung tự nhập. Gợi ý mô tả rõ khi chọn "Khác" (other) — ô nhập phía
+   * client đã yêu cầu/chặn theo đúng gợi ý đó, nên không lặp lại ràng buộc
+   * "bắt buộc khi other" ở đây.
+   *
+   * 🔴 CỐ TÌNH không dùng `@ValidateIf`: class-validator gom TOÀN BỘ validator
+   * của một property lại rồi mới xét điều kiện — hễ dùng `@ValidateIf` là MỌI
+   * validator khác trên CÙNG property (kể cả `@MaxLength`) đều bị bỏ qua khi
+   * điều kiện sai, không có cách nào "chỉ áp điều kiện cho riêng MinLength".
+   * Trước đây gộp chung khiến `reasonType` khác "other" đi kèm lý do dài tuỳ ý
+   * lọt qua validation hoàn toàn (không kiểm tra 300 ký tự) — chuỗi đó sau này
+   * ghép vào `Payment.refundReason` (giới hạn 300 ký tự ở schema) và làm
+   * `flagRefundForOrder` lưu thất bại, mất luôn dấu hiệu "cần hoàn tiền".
+   * `MaxLength` giờ LUÔN áp dụng, không phụ thuộc `reasonType`.
    */
-  @ValidateIf((o: CancelOrderDto) => o.reasonType === 'other')
-  @IsString({ message: 'Vui lòng nhập lý do huỷ.' })
-  @MinLength(5, { message: 'Vui lòng mô tả rõ hơn (ít nhất 5 ký tự).' })
+  @IsOptional()
+  @IsString({ message: 'Lý do không hợp lệ.' })
   @MaxLength(300, { message: 'Lý do tối đa 300 ký tự.' })
   reason?: string;
 }

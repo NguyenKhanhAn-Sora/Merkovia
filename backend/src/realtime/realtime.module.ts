@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RealtimeGateway } from './realtime.gateway';
 import { AuthModule } from '../auth/auth.module';
+import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { User, UserSchema } from '../users/schemas/user.schema';
 
 /**
@@ -14,6 +15,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
 @Module({
   imports: [
     AuthModule, // AccountService: xác thực handshake bằng cookie phiên
+    AdminAuthModule, // AdminAuthService: xác thực handshake của Kênh Quản trị (CSKH)
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
   ],
   providers: [RealtimeGateway],

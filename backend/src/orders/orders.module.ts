@@ -17,6 +17,7 @@ import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { PlatformSettingsModule } from '../platform-settings/platform-settings.module';
+import { VouchersModule } from '../vouchers/vouchers.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { PlatformSettingsModule } from '../platform-settings/platform-settings.m
     NotificationsModule, // báo tin đơn hàng cho hai phía
     AuditLogModule, // ghi nhật ký khi admin xử lý tranh chấp thay shop bị đình chỉ
     PlatformSettingsModule, // SLA xác nhận/giao hàng, hạn trả hàng
+    VouchersModule, // tính + giành lượt mã giảm giá lúc đặt hàng
   ],
   controllers: [OrdersController, ShopOrdersController, AdminOrdersController],
   providers: [OrdersService],

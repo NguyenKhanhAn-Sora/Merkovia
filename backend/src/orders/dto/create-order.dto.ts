@@ -17,6 +17,16 @@ import {
 } from 'class-validator';
 import { PAYMENT_METHODS } from '../schemas/order.schema';
 
+/** Mã giảm giá người mua áp cho MỘT gian hàng trong giỏ. */
+export class CartVoucherDto {
+  @IsMongoId({ message: 'Gian hàng không hợp lệ.' })
+  shopId: string;
+
+  @IsString({ message: 'Mã giảm giá không hợp lệ.' })
+  @MaxLength(20, { message: 'Mã giảm giá không hợp lệ.' })
+  code: string;
+}
+
 /*
  * Mọi thông báo lỗi ở đây đều viết bằng TIẾNG VIỆT và nói rõ phải sửa gì.
  * class-validator mặc định trả câu tiếng Anh kiểu "recipientName must be
@@ -141,6 +151,14 @@ class CartBaseDto {
     message: 'Phương thức thanh toán không hợp lệ.',
   })
   paymentMethod: string;
+
+  /** Mã giảm giá đã áp, tối đa một mã cho mỗi gian hàng trong giỏ. */
+  @IsOptional()
+  @IsArray({ message: 'Danh sách mã giảm giá không hợp lệ.' })
+  @ArrayMaxSize(20, { message: 'Quá nhiều mã giảm giá.' })
+  @ValidateNested({ each: true })
+  @Type(() => CartVoucherDto)
+  vouchers?: CartVoucherDto[];
 }
 
 /**

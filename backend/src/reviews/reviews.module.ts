@@ -18,6 +18,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { AdminAuthModule } from '../admin-auth/admin-auth.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { PlatformSettingsModule } from '../platform-settings/platform-settings.module';
+import { MediaModule } from '../media/media.module';
 
 /**
  * Đánh giá sản phẩm sau khi mua.
@@ -44,6 +45,7 @@ import { PlatformSettingsModule } from '../platform-settings/platform-settings.m
     AdminAuthModule, // AdminAuthGuard (trang quản trị)
     AuditLogModule, // ghi nhật ký khi admin ẩn/gỡ ẩn đánh giá hoặc phản hồi
     PlatformSettingsModule, // hạn sửa đánh giá
+    MediaModule, // xoá ảnh/video R2 mồ côi khi sửa đánh giá
   ],
   controllers: [
     ProductReviewsController,

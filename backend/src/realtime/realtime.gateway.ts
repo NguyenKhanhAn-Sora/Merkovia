@@ -9,6 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { Server, Socket } from 'socket.io';
 import { AccountService } from '../auth/account.service';
+import { AdminAuthService } from '../admin-auth/admin-auth.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import {
   accessCookieName,
@@ -52,12 +53,34 @@ export class RealtimeGateway
 
   constructor(
     private readonly accounts: AccountService,
+    private readonly adminAuth: AdminAuthService,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
     try {
       const scope = scopeFromSocket(client.handshake);
+
+      // Admin xác thực HOÀN TOÀN KHÁC buyer/seller: không có bản ghi `User`
+      // nào cho admin (chỉ một tài khoản gốc cấu hình qua `.env`, `sub` luôn
+      // là chuỗi cố định "root-admin" — xem `AdminAuthService`). Đi qua
+      // `AccountService.userFromAccessToken` sẽ tra `User` bằng một chuỗi
+      // không phải ObjectId hợp lệ và ném lỗi thay vì từ chối sạch sẽ, nên
+      // phải tách nhánh xác thực RIÊNG trước khi chạm tới đường buyer/seller.
+      if (scope === 'admin') {
+        const token = readCookieFromHeader(
+          client.handshake.headers.cookie,
+          accessCookieName('admin'),
+        );
+        const admin = this.adminAuth.principalFromAccessToken(token);
+        client.data.userId = admin.id;
+        client.data.audience = 'admin' as AppScope;
+        await client.join(roomOf(admin.id, 'admin'));
+        const key = roomOf(admin.id, 'admin');
+        this.online.set(key, (this.online.get(key) ?? 0) + 1);
+        return;
+      }
+
       const token = readCookieFromHeader(
         client.handshake.headers.cookie,
         accessCookieName(scope),
@@ -89,8 +112,10 @@ export class RealtimeGateway
     const left = (this.online.get(key) ?? 1) - 1;
     if (left <= 0) {
       this.online.delete(key);
-      // Rời hẳn (không còn tab nào) → ghi mốc hoạt động cuối.
-      this.touchActive(userId);
+      // Rời hẳn (không còn tab nào) → ghi mốc hoạt động cuối. Admin không có
+      // bản ghi `User` (id luôn là chuỗi "root-admin", không phải ObjectId)
+      // nên bỏ qua — gọi vào đây chỉ tổ thất bại một truy vấn vô ích.
+      if (audience !== 'admin') this.touchActive(userId);
     } else {
       this.online.set(key, left);
     }

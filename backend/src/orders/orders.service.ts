@@ -43,6 +43,7 @@ import { shortId } from '../common/text';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
+import { VouchersService } from '../vouchers/vouchers.service';
 import type { UserDocument } from '../users/schemas/user.schema';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 
@@ -80,6 +81,8 @@ interface CartInput {
     lng?: number;
   };
   paymentMethod: string;
+  /** Tối đa một mã cho mỗi gian hàng — khớp `shopId` để biết áp vào nhóm nào. */
+  vouchers?: { shopId: string; code: string }[];
 }
 
 /** Thời gian giữ kho cho đơn chờ thanh toán online. */
@@ -130,6 +133,7 @@ export class OrdersService {
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
     private readonly settings: PlatformSettingsService,
+    private readonly vouchers: VouchersService,
   ) {}
 
   /** Mô tả ngắn các món trong đơn cho nội dung thông báo. */
@@ -239,20 +243,24 @@ export class OrdersService {
           }
         : undefined,
       serviceName: g.shipping?.serviceName,
+      discount: g.discount,
+      voucherCode: g.voucherCode,
     }));
 
     const itemsTotal = shops.reduce((s, g) => s + g.itemsTotal, 0);
     const shippingTotal = shops.reduce((s, g) => s + g.shippingFee, 0);
+    const discountTotal = shops.reduce((s, g) => s + g.discount, 0);
 
     return {
       shops,
       itemsTotal,
       shippingTotal,
+      discountTotal,
       shippingSaved: shops.reduce(
         (s, g) => s + (g.baseShippingFee - g.shippingFee),
         0,
       ),
-      total: itemsTotal + shippingTotal,
+      total: itemsTotal + shippingTotal - discountTotal,
       carrier: {
         name: this.shipping.name,
         isCarrier: this.shipping.isCarrier,
@@ -283,8 +291,28 @@ export class OrdersService {
 
     const checkoutGroup = new Types.ObjectId();
     const created: OrderDocument[] = [];
+    /**
+     * Mỗi mã giảm giá đã giành được (xem `VouchersService.redeem`) — nếu ghi
+     * đơn hỏng giữa chừng ở BẤT KỲ nhóm nào, toàn bộ lượt đã giành phải được
+     * trả lại trong `compensate()`, giống hệt cách kho được hoàn.
+     */
+    const redeemedVouchers: {
+      voucherId: Types.ObjectId;
+      redemptionId: Types.ObjectId;
+    }[] = [];
     try {
       for (const [index, group] of groups.entries()) {
+        if (group.voucherId) {
+          const redemptionId = await this.vouchers.redeem(
+            group.voucherId,
+            group.shop._id,
+            user._id,
+            checkoutGroup,
+            group.discount,
+          );
+          redeemedVouchers.push({ voucherId: group.voucherId, redemptionId });
+        }
+
         const order = await new this.orderModel({
           orderCode: this.newOrderCode(),
           buyer: user._id,
@@ -297,8 +325,10 @@ export class OrdersService {
           shippingFee: group.shippingFee,
           // Chốt lại khối lượng để sau còn tính lại cước khi đổi địa chỉ.
           weightGram: group.weightGram,
-          discount: 0,
-          total: group.itemsTotal + group.shippingFee,
+          discount: group.discount,
+          voucherCode: group.voucherCode,
+          voucher: group.voucherId,
+          total: group.itemsTotal + group.shippingFee - group.discount,
           status: group.status,
           paymentMethod: dto.paymentMethod as PaymentMethod,
           paymentExpiresAt: group.paymentExpiresAt,
@@ -314,7 +344,7 @@ export class OrdersService {
         created.push(order);
       }
     } catch (e: unknown) {
-      await this.compensate(created, stockItems);
+      await this.compensate(created, stockItems, redeemedVouchers);
 
       // Hai request cùng token chạy song song: kẻ thua trả về đơn của kẻ thắng.
       if (this.isDuplicateKey(e) && dto.clientToken) {
@@ -408,8 +438,12 @@ export class OrdersService {
     }
   }
 
-  /** Xoá đơn lỡ tạo và trả kho — dùng khi ghi đơn thất bại giữa chừng. */
-  private async compensate(created: OrderDocument[], stockItems: StockItem[]) {
+  /** Xoá đơn lỡ tạo, trả kho và trả lại mọi mã giảm giá đã giành — dùng khi ghi đơn thất bại giữa chừng. */
+  private async compensate(
+    created: OrderDocument[],
+    stockItems: StockItem[],
+    redeemedVouchers: { voucherId: Types.ObjectId; redemptionId: Types.ObjectId }[] = [],
+  ) {
     if (created.length) {
       await this.orderModel
         .deleteMany({ _id: { $in: created.map((o) => o._id) } })
@@ -422,6 +456,13 @@ export class OrdersService {
       .catch((err: unknown) =>
         this.logger.error(`Không hoàn được kho khi đền bù: ${String(err)}`),
       );
+    for (const r of redeemedVouchers) {
+      await this.vouchers
+        .release(r.voucherId, r.redemptionId)
+        .catch((err: unknown) =>
+          this.logger.error(`Không hoàn được mã giảm giá khi đền bù: ${String(err)}`),
+        );
+    }
   }
 
   private isDuplicateKey(e: unknown): boolean {
@@ -493,6 +534,9 @@ export class OrdersService {
         paymentExpiresAt?: Date;
         sellerActionDeadlineAt?: Date;
         sellerActionWarnAt?: Date;
+        discount: number;
+        voucherId?: Types.ObjectId;
+        voucherCode?: string;
       }
     >();
 
@@ -551,6 +595,7 @@ export class OrdersService {
         weightGram: 0,
         shippingFee: 0,
         status: 'pending' as OrderStatus,
+        discount: 0,
       };
       group.items.push({
         product: product._id,
@@ -570,6 +615,27 @@ export class OrdersService {
       group.weightGram +=
         chargeableWeight(product.shipping ?? {}) * item.quantity;
       groups.set(key, group);
+    }
+
+    /**
+     * Mã giảm giá — áp lên TIỀN HÀNG của đúng nhóm shop, tính TRƯỚC cước vận
+     * chuyển (`total` = itemsTotal + shippingFee - discount, xem vòng lặp bên
+     * dưới và `checkout()`). Sai mã/hết hạn/không đủ điều kiện đều ném lỗi rõ
+     * ràng ngay ở đây — `quote()` VÀ `checkout()` cùng gọi `buildGroups` nên
+     * người mua thấy lỗi (hoặc số tiền giảm) giống hệt nhau ở cả hai bước.
+     */
+    for (const v of dto.vouchers ?? []) {
+      const group = groups.get(v.shopId);
+      if (!group) continue; // shop này không có trong giỏ — bỏ qua thay vì báo lỗi khó hiểu
+      const resolved = await this.vouchers.resolveForCheckout(
+        group.shop._id,
+        user._id,
+        v.code,
+        group.itemsTotal,
+      );
+      group.discount = resolved.discount;
+      group.voucherId = resolved.voucherId;
+      group.voucherCode = resolved.code;
     }
 
     // Cước vận chuyển và trạng thái ban đầu chốt sau khi đã biết tổng tiền và
@@ -648,28 +714,49 @@ export class OrdersService {
     reason?: string,
     allowedFrom: readonly OrderStatus[] = [],
     reasonType?: CancelReason,
+    /**
+     * Có mặt khi lần huỷ này đi kèm DUYỆT một `cancelRequest` đang chờ — gộp
+     * "đánh dấu cancelRequest.status = approved" vào CHUNG một `updateOne`
+     * nguyên tử với việc huỷ đơn thật sự.
+     *
+     * 🔴 Trước đây `resolveCancelRequest` ghi hai bước RIÊNG: đánh dấu approved
+     * trước, rồi mới gọi `cancelOrder`. Nếu đơn vừa đổi trạng thái đúng lúc đó
+     * (VD seller bấm "Giao hàng" ngay giữa hai bước), bước huỷ thất bại nhưng
+     * bước đánh dấu "approved" đã lỡ ghi xong — `cancelRequest.status` kẹt ở
+     * "approved" vĩnh viễn trong khi đơn KHÔNG hề bị huỷ, và không còn đường
+     * xử lý lại (hàm này chỉ chạy khi status đang là "pending"). Gộp thành một
+     * updateOne thì HOẶC cả hai cùng đổi, HOẶC không đổi gì cả — không còn
+     * trạng thái lửng lơ.
+     */
+    approvingCancelRequest?: { note?: string },
   ) {
-    const res = await this.orderModel.updateOne(
-      {
-        _id: order._id,
-        status: { $in: [...allowedFrom] },
-        stockReleased: false,
+    const filter: Record<string, unknown> = {
+      _id: order._id,
+      status: { $in: [...allowedFrom] },
+      stockReleased: false,
+    };
+    const set: Record<string, unknown> = {
+      status: 'cancelled',
+      stockReleased: true,
+      cancelledBy: by,
+      // `undefined` bị mongoose loại khỏi $set nên huỷ bởi seller/hệ thống
+      // không ghi nhãn — đúng ý, chỉ người mua mới chọn nhãn.
+      cancelReasonType: reasonType,
+      cancelReason: reason,
+    };
+    if (approvingCancelRequest) {
+      filter['cancelRequest.status'] = 'pending';
+      set['cancelRequest.status'] = 'approved';
+      set['cancelRequest.respondedAt'] = new Date();
+      set['cancelRequest.sellerNote'] = approvingCancelRequest.note?.trim();
+    }
+
+    const res = await this.orderModel.updateOne(filter, {
+      $set: set,
+      $push: {
+        timeline: { status: 'cancelled', at: new Date(), by, note: reason },
       },
-      {
-        $set: {
-          status: 'cancelled',
-          stockReleased: true,
-          cancelledBy: by,
-          // `undefined` bị mongoose loại khỏi $set nên huỷ bởi seller/hệ thống
-          // không ghi nhãn — đúng ý, chỉ người mua mới chọn nhãn.
-          cancelReasonType: reasonType,
-          cancelReason: reason,
-        },
-        $push: {
-          timeline: { status: 'cancelled', at: new Date(), by, note: reason },
-        },
-      },
-    );
+    });
 
     if (res.modifiedCount !== 1) {
       // Không giành được: đơn đã bị huỷ trước đó, hoặc đã qua giai đoạn huỷ được.
@@ -677,7 +764,9 @@ export class OrdersService {
       throw new ConflictException(
         fresh?.status === 'cancelled'
           ? 'Đơn hàng này đã được huỷ trước đó.'
-          : 'Đơn hàng đã chuyển sang giai đoạn không thể huỷ.',
+          : approvingCancelRequest
+            ? 'Đơn hàng vừa chuyển sang giai đoạn không thể huỷ nên không áp dụng được yêu cầu huỷ này nữa. Yêu cầu vẫn đang chờ — vui lòng tải lại trang.'
+            : 'Đơn hàng đã chuyển sang giai đoạn không thể huỷ.',
       );
     }
 
@@ -1021,34 +1110,16 @@ export class OrdersService {
       return { ok: true, order: this.toSellerOrder(order, true) };
     }
 
-    // Đánh dấu ĐÃ DUYỆT trước, rồi mới huỷ — atomic cùng điều kiện với nhánh
-    // từ chối ở trên, để 2 request xử lý cùng lúc không thể cùng "thắng".
-    // `cancelOrder` giành quyền bằng updateOne có điều kiện riêng của chính nó
-    // nên phần này phải ghi xong xuôi trước đó.
-    const approveRes = await this.orderModel.updateOne(
-      { _id: order._id, 'cancelRequest.status': 'pending' },
-      {
-        $set: {
-          'cancelRequest.status': 'approved',
-          'cancelRequest.respondedAt': new Date(),
-          'cancelRequest.sellerNote': note?.trim(),
-        },
-      },
-    );
-    if (approveRes.modifiedCount !== 1) {
-      throw new ConflictException(
-        'Yêu cầu huỷ này vừa được xử lý bởi thao tác khác. Vui lòng tải lại trang.',
-      );
-    }
-    order.cancelRequest.status = 'approved';
-    order.cancelRequest.respondedAt = new Date();
-    order.cancelRequest.sellerNote = note?.trim();
-
+    // Đánh dấu "đã duyệt" VÀ huỷ đơn trong CÙNG một updateOne nguyên tử (xem
+    // chú thích ở `cancelOrder`) — không còn hai bước ghi rời rạc có thể để
+    // lại trạng thái lửng lơ khi bước sau thất bại.
     const res = await this.cancelOrder(
       order,
       'buyer', // người mua mới là bên muốn huỷ; người duyệt chỉ chấp thuận
       order.cancelRequest.reason || 'Người mua yêu cầu huỷ',
       SELLER_CANCELLABLE,
+      undefined,
+      { note },
     );
     await this.notifications.notifyUser(order.buyer, 'buyer', {
       type: 'cancel_approved',
@@ -1997,6 +2068,7 @@ export class OrdersService {
       itemsTotal: o.itemsTotal,
       shippingFee: o.shippingFee,
       discount: o.discount,
+      voucherCode: o.voucherCode,
       total: o.total,
       paymentMethod: o.paymentMethod,
       paymentExpiresAt: o.paymentExpiresAt,
@@ -2109,6 +2181,7 @@ export class OrdersService {
       itemsTotal: o.itemsTotal,
       shippingFee: o.shippingFee,
       discount: o.discount,
+      voucherCode: o.voucherCode,
       total: o.total,
       paymentMethod: o.paymentMethod,
       paidAt: o.paidAt,

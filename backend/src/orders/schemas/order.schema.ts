@@ -340,6 +340,13 @@ export class Order {
   @Prop({ required: true, min: 0, default: 0 })
   discount: number;
 
+  /** Mã giảm giá đã áp (nếu có) — chụp lại vì `Voucher` có thể bị đổi/kết thúc sau. */
+  @Prop({ trim: true, uppercase: true })
+  voucherCode?: string;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Voucher' })
+  voucher?: Types.ObjectId;
+
   /** Số tiền cuối cùng người mua trả. */
   @Prop({ required: true, min: 0 })
   total: number;

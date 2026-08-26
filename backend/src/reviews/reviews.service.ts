@@ -27,6 +27,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import type { AdminPrincipal } from '../admin-auth/admin-auth.service';
 import { User, type UserDocument } from '../users/schemas/user.schema';
 import { PlatformSettingsService } from '../platform-settings/platform-settings.service';
+import { MediaService } from '../media/media.service';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -69,6 +70,7 @@ export class ReviewsService {
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
     private readonly settings: PlatformSettingsService,
+    private readonly media: MediaService,
   ) {}
 
   /* ------------------------------ Người mua ------------------------------ */
@@ -204,6 +206,17 @@ export class ReviewsService {
       );
     }
 
+    // Ảnh/video bị GỠ hoặc THAY ở lần sửa duy nhất này — key cũ phải dọn khỏi
+    // R2 sau khi lưu, nếu không thì nằm mồ côi vĩnh viễn (chỉ chỗ này ghi đè
+    // mảng `media`, và trước giờ chưa từng gọi `media.delete()` khi thay ảnh
+    // đánh giá, chỉ khi xoá hẳn tài khoản/đánh giá).
+    const nextMediaKeys = new Set(
+      (dto.media ?? []).map((m) => m.key?.trim()).filter((k): k is string => !!k),
+    );
+    const removedMediaKeys = review.media
+      .map((m) => m.key)
+      .filter((k): k is string => !!k && !nextMediaKeys.has(k));
+
     const oldRating = review.rating;
     review.rating = dto.rating;
     review.comment = dto.comment?.trim() ?? '';
@@ -215,6 +228,15 @@ export class ReviewsService {
     review.anonymous = !!dto.anonymous;
     review.edited = true;
     await review.save();
+
+    // Xoá sau khi lưu THÀNH CÔNG; một key lỗi không chặn các key còn lại.
+    for (const key of removedMediaKeys) {
+      try {
+        await this.media.delete(key);
+      } catch (err: unknown) {
+        this.logger.warn(`Không xoá được ảnh/video cũ trên R2 "${key}": ${String(err)}`);
+      }
+    }
 
     // Điểm sao đổi thì bù trừ đúng ô cũ/mới — trừ trước cộng sau để không bao
     // giờ có khoảnh khắc tổng bị âm nếu hai request xen kẽ nhau.
