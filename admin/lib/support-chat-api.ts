@@ -98,7 +98,12 @@ export function reopenSupportConversation(
 }
 
 export interface SupportChatSocketHandlers {
-  onMessage: (e: { conversationId: string; message: SupportMessage }) => void;
+  onMessage: (e: {
+    conversationId: string;
+    message: SupportMessage;
+    /** Trạng thái hội thoại SAU tin này — hội thoại đã đóng tự mở lại khi có tin mới. */
+    status: SupportStatus;
+  }) => void;
   onRead: (e: { conversationId: string }) => void;
 }
 

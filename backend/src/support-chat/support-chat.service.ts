@@ -23,6 +23,16 @@ const MSG_PAGE = 30;
 /** Danh tính hiển thị cố định phía admin — khớp mô hình "một hộp thư chung". */
 const SUPPORT_PEER = { name: 'Merkovia Support' };
 
+/**
+ * Tin tự động — gửi NGAY khi người dùng vừa mở lại một hội thoại (mới toanh
+ * hoặc vừa được admin đóng) để họ không cảm giác bị im lặng trong lúc chờ.
+ * Gắn `senderRole: 'admin'` (không phải role thứ ba) vì với người dùng, đây
+ * vẫn là "phía CSKH" trả lời — tách thêm một role chỉ cho một câu chào là
+ * phức tạp hoá không cần thiết.
+ */
+const AUTO_GREETING_TEXT =
+  'Cảm ơn bạn đã liên hệ Merkovia Support! Đội ngũ CSKH sẽ phản hồi trong thời gian sớm nhất, mong bạn vui lòng chờ trong giây lát 🙏';
+
 @Injectable()
 export class SupportChatService {
   private readonly logger = new Logger(SupportChatService.name);
@@ -97,18 +107,58 @@ export class SupportChatService {
       { $setOnInsert: { user: user._id, userRole: role, lastMessageAt: new Date() } },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
+
+    /**
+     * 🔴 KHÔNG dùng "hội thoại vừa được tạo hay chưa" để quyết định có chào
+     * tự động hay không — trang `/support` gọi `POST open` để get-or-create
+     * hội thoại NGAY khi mở trang (trước khi người dùng gõ gì), nên tới lúc
+     * người dùng gửi tin thật đầu tiên thì hội thoại đã tồn tại rồi, khiến
+     * "isNew theo hội thoại" luôn sai (đã tự kiểm chứng: gọi thẳng API bằng
+     * script rời thì chào đúng, nhưng qua trang thật thì không — vì trang
+     * đã âm thầm tạo hội thoại trước đó). Tín hiệu đúng phải là "hội thoại
+     * NÀY đã có tin nhắn nào chưa", không phải "hội thoại có tồn tại chưa".
+     */
+    const hadMessagesBefore = await this.msgModel.exists({ conversation: conv._id });
+    const isFirstMessageEver = !hadMessagesBefore;
+    const wasClosed = conv.status === 'closed';
+
     const msg = await this.createMessage(conv, 'user', payload);
 
     // Nhắn lại vào hội thoại đã đóng thì tự mở lại — admin cần thấy ngay,
-    // không phải chờ người dùng bấm nút "Mở lại" nào đó không tồn tại.
-    if (conv.status === 'closed') {
+    // không phải chờ người dùng bấm nút "Mở lại" nào đó không tồn tại. Admin
+    // TỰ đóng nhầm cũng tự sửa được theo đúng cách này: chỉ cần người dùng
+    // gõ thêm một tin là hội thoại quay lại "Đang mở" ngay lập tức.
+    if (wasClosed) {
       await this.convModel.updateOne({ _id: conv._id }, { $set: { status: 'open' } });
     }
+    const status: 'open' | 'closed' = 'open';
 
     await this.emitToAdmin('support:message', {
       conversationId: String(conv._id),
       message: msg,
+      status,
     });
+
+    // Chào tự động khi: hội thoại MỚI TOANH (lần đầu liên hệ), hoặc VỪA được
+    // mở lại từ trạng thái đã đóng (với người dùng, cảm giác y hệt lần đầu
+    // liên hệ lại — họ cần biết có người sẽ xem tin, không phải im lặng).
+    // Cố tình KHÔNG chào lại ở mọi tin nhắn tiếp theo trong một hội thoại
+    // đang mở bình thường — chào liên tục mỗi tin sẽ gây phiền, không phải
+    // trấn an.
+    if (isFirstMessageEver || wasClosed) {
+      const auto = await this.createAutoReply(conv, AUTO_GREETING_TEXT);
+      this.gateway.emitToUser(String(user._id), role, 'support:message', {
+        conversationId: String(conv._id),
+        message: auto,
+        status,
+      });
+      await this.emitToAdmin('support:message', {
+        conversationId: String(conv._id),
+        message: auto,
+        status,
+      });
+    }
+
     return { message: msg };
   }
 
@@ -173,15 +223,22 @@ export class SupportChatService {
     payload: { text?: string; images?: OutgoingImage[] },
   ) {
     const conv = await this.requireConversation(id);
+    // Admin chủ động nhắn tiếp vào một hội thoại đã đóng — rõ ràng không còn
+    // "đã xong" nữa, tự mở lại luôn thay vì bắt admin bấm thêm nút "Mở lại".
+    const wasClosed = conv.status === 'closed';
+    if (wasClosed) {
+      await this.convModel.updateOne({ _id: conv._id }, { $set: { status: 'open' } });
+    }
+    const status: 'open' | 'closed' = 'open';
+
     const msg = await this.createMessage(conv, 'admin', payload);
 
-    await this.gateway.emitToUser(
-      String(conv.user),
-      conv.userRole,
-      'support:message',
-      { conversationId: String(conv._id), message: msg },
-    );
-    return { message: msg };
+    this.gateway.emitToUser(String(conv.user), conv.userRole, 'support:message', {
+      conversationId: String(conv._id),
+      message: msg,
+      status,
+    });
+    return { message: msg, status };
   }
 
   async adminMarkRead(id: string) {
@@ -213,6 +270,15 @@ export class SupportChatService {
     this.logger.log(
       `Admin ${admin.email} ${status === 'closed' ? 'đóng' : 'mở lại'} hội thoại CSKH ${conv._id}.`,
     );
+
+    // Báo NGAY cho người dùng nếu họ đang mở sẵn trang Hỗ trợ — không cần đợi
+    // họ gửi thêm tin mới thấy trạng thái đổi. Quan trọng nhất ở chiều "đóng":
+    // admin lỡ tay đóng thì người dùng biết ngay (dòng thông báo trên trang),
+    // thay vì thấy im lặng và tưởng chưa ai xử lý.
+    this.gateway.emitToUser(String(conv.user), conv.userRole, 'support:status', {
+      conversationId: String(conv._id),
+      status,
+    });
     return { ok: true };
   }
 
@@ -249,6 +315,24 @@ export class SupportChatService {
       },
     );
 
+    return this.shapeMessage(msg);
+  }
+
+  /**
+   * Tin chào tự động — KHÔNG đi qua `createMessage()`: cố tình không cập nhật
+   * `lastMessage`/`lastMessageAt` của hội thoại, để bản xem trước trong danh
+   * sách phía admin vẫn hiện đúng CÂU HỎI THẬT của người dùng (thứ admin cần
+   * đọc) thay vì bị che bởi câu chào máy tự sinh ra ngay sau đó. Vẫn cộng
+   * `userUnread` bình thường vì đây là tin thật người dùng cần thấy.
+   */
+  private async createAutoReply(conv: SupportConversationDocument, text: string) {
+    const msg = await this.msgModel.create({
+      conversation: conv._id,
+      senderRole: 'admin',
+      text,
+      images: [],
+    });
+    await this.convModel.updateOne({ _id: conv._id }, { $inc: { userUnread: 1 } });
     return this.shapeMessage(msg);
   }
 

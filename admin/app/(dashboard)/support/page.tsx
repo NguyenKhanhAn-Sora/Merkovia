@@ -35,6 +35,33 @@ const USER_ROLE_LABEL: Record<string, string> = {
   seller: "Người bán",
 };
 
+/** Ảnh đại diện người dùng; rơi về icon vai (buyer/seller) khi chưa có avatar. */
+function UserAvatar({
+  url,
+  userRole,
+  size = 40,
+}: {
+  url?: string;
+  userRole: string;
+  size?: number;
+}) {
+  return (
+    <span
+      style={{ width: size, height: size }}
+      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.05] text-star/40"
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : userRole === "seller" ? (
+        <Storefront size={size * 0.45} weight="duotone" />
+      ) : (
+        <UserIcon size={size * 0.45} weight="duotone" />
+      )}
+    </span>
+  );
+}
+
 function chatTime(iso: string): string {
   const d = new Date(iso);
   const diff = Date.now() - d.getTime();
@@ -54,6 +81,15 @@ export default function AdminSupportPage() {
   const [counts, setCounts] = useState({ open: 0, closed: 0, all: 0 });
   const [loadingList, setLoadingList] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
+  /**
+   * Chi tiết hội thoại ĐANG XEM — cố tình tách khỏi `items`, không suy ra bằng
+   * `items.find(...)`. Lý do: `items` bị lọc theo tab hiện tại — hội thoại
+   * đang mở có thể VỪA đổi trạng thái (admin bấm "Đóng", hoặc người dùng nhắn
+   * lại làm nó tự mở lại) và biến mất khỏi tab đang chọn ngay sau khi tải lại
+   * danh sách. Tách riêng để khung chat bên phải không bị "rớt" khỏi màn hình
+   * chỉ vì món đang xem không còn khớp bộ lọc tab nữa.
+   */
+  const [activeConv, setActiveConv] = useState<SupportConversationItem | null>(null);
   const [error, setError] = useState("");
 
   const [messages, setMessages] = useState<SupportMessage[]>([]);
@@ -68,8 +104,6 @@ export default function AdminSupportPage() {
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
   const boxRef = useRef<HTMLDivElement>(null);
-
-  const active = items.find((c) => c.id === activeId) ?? null;
 
   const loadList = () => {
     setLoadingList(true);
@@ -87,15 +121,17 @@ export default function AdminSupportPage() {
 
   useEffect(loadList, [tab]);
 
-  const openConversation = async (id: string) => {
-    setActiveId(id);
+  const openConversation = async (conv: SupportConversationItem) => {
+    setActiveId(conv.id);
+    setActiveConv(conv);
     setLoadingMsgs(true);
     try {
-      const { items: msgs, hasMore: more } = await listSupportMessages(id);
+      const { items: msgs, hasMore: more } = await listSupportMessages(conv.id);
       setMessages(msgs);
       setHasMore(more);
-      await markSupportRead(id);
-      setItems((prev) => prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
+      await markSupportRead(conv.id);
+      setActiveConv((prev) => (prev ? { ...prev, unread: 0 } : prev));
+      setItems((prev) => prev.map((c) => (c.id === conv.id ? { ...c, unread: 0 } : c)));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Không tải được cuộc trò chuyện.");
     } finally {
@@ -105,26 +141,18 @@ export default function AdminSupportPage() {
 
   useEffect(() => {
     return connectSupportChat({
-      onMessage: ({ conversationId, message }) => {
-        // Cập nhật danh sách (tin cuối + đưa lên đầu) bất kể đang mở hội thoại nào.
-        setItems((prev) => {
-          const idx = prev.findIndex((c) => c.id === conversationId);
-          if (idx === -1) {
-            loadList(); // hội thoại mới toanh (lần đầu người dùng nhắn) — tải lại cả trang.
-            return prev;
-          }
-          const updated = {
-            ...prev[idx],
-            lastMessage: { text: message.text, senderRole: message.senderRole, at: message.createdAt },
-            lastMessageAt: message.createdAt,
-            unread: conversationId === activeIdRef.current ? 0 : prev[idx].unread + 1,
-          };
-          return [updated, ...prev.filter((_, i) => i !== idx)];
-        });
+      onMessage: ({ conversationId, message, status }) => {
+        // Tải lại cả danh sách thay vì tự vá từng dòng: tin mới có thể kéo
+        // theo ĐỔI TAB (hội thoại đã đóng tự mở lại khi có tin — xem dưới),
+        // tự vá thủ công dễ sót đúng trường hợp đó. Danh sách không nặng nên
+        // tải lại mỗi tin không đáng ngại.
+        loadList();
+
         if (conversationId === activeIdRef.current) {
           setMessages((prev) =>
             prev.some((m) => m.id === message.id) ? prev : [...prev, message],
           );
+          setActiveConv((prev) => (prev ? { ...prev, status } : prev));
           void markSupportRead(conversationId);
         }
       },
@@ -167,16 +195,9 @@ export default function AdminSupportPage() {
     try {
       const { message } = await sendSupportMessage(activeId, { text: body });
       setMessages((prev) => prev.map((m) => (m.id === tempId ? message : m)));
-      setItems((prev) => {
-        const idx = prev.findIndex((c) => c.id === activeId);
-        if (idx === -1) return prev;
-        const updated = {
-          ...prev[idx],
-          lastMessage: { text: body, senderRole: "admin" as const, at: message.createdAt },
-          lastMessageAt: message.createdAt,
-        };
-        return [updated, ...prev.filter((_, i) => i !== idx)];
-      });
+      // Gửi tin luôn tự mở lại hội thoại phía backend nếu nó đang "đã đóng".
+      setActiveConv((prev) => (prev ? { ...prev, status: "open" } : prev));
+      loadList();
     } catch (e: unknown) {
       setMessages((prev) =>
         prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)),
@@ -188,11 +209,13 @@ export default function AdminSupportPage() {
   };
 
   const toggleStatus = async () => {
-    if (!active) return;
+    if (!activeConv) return;
     setBusy(true);
     try {
-      if (active.status === "open") await closeSupportConversation(active.id);
-      else await reopenSupportConversation(active.id);
+      const next = activeConv.status === "open" ? "closed" : "open";
+      if (next === "closed") await closeSupportConversation(activeConv.id);
+      else await reopenSupportConversation(activeConv.id);
+      setActiveConv((prev) => (prev ? { ...prev, status: next } : prev));
       loadList();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Không cập nhật được trạng thái.");
@@ -230,7 +253,7 @@ export default function AdminSupportPage() {
           {/* Danh sách */}
           <div
             className={`flex min-h-0 flex-col border-white/[0.07] md:border-r ${
-              active ? "hidden md:flex" : "flex"
+              activeConv ? "hidden md:flex" : "flex"
             }`}
           >
             <div className="px-4 pt-4">
@@ -251,18 +274,12 @@ export default function AdminSupportPage() {
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => void openConversation(c.id)}
+                    onClick={() => void openConversation(c)}
                     className={`flex w-full items-start gap-3 border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
                       c.id === activeId ? "bg-white/[0.07]" : "hover:bg-white/[0.04]"
                     }`}
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-star/40">
-                      {c.userRole === "seller" ? (
-                        <Storefront size={18} weight="duotone" />
-                      ) : (
-                        <UserIcon size={18} weight="duotone" />
-                      )}
-                    </span>
+                    <UserAvatar url={c.user.avatarUrl} userRole={c.userRole} size={40} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center justify-between gap-2">
                         <span
@@ -306,8 +323,8 @@ export default function AdminSupportPage() {
           </div>
 
           {/* Hội thoại */}
-          <div className={`flex min-h-0 flex-col ${active ? "flex" : "hidden md:flex"}`}>
-            {!active ? (
+          <div className={`flex min-h-0 flex-col ${activeConv ? "flex" : "hidden md:flex"}`}>
+            {!activeConv ? (
               <div className="flex flex-1 items-center justify-center">
                 <EmptyState
                   icon={Headset}
@@ -320,35 +337,36 @@ export default function AdminSupportPage() {
                 <div className="flex items-center gap-2.5 border-b border-white/[0.07] px-4 py-3">
                   <button
                     type="button"
-                    onClick={() => setActiveId(null)}
+                    onClick={() => {
+                      setActiveId(null);
+                      setActiveConv(null);
+                    }}
                     aria-label="Về danh sách"
                     className="flex h-9 w-9 items-center justify-center rounded-lg text-star/50 transition-colors hover:bg-white/[0.06] hover:text-star md:hidden"
                   >
                     <ArrowLeft size={17} />
                   </button>
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-star/40">
-                    {active.userRole === "seller" ? (
-                      <Storefront size={17} weight="duotone" />
-                    ) : (
-                      <UserIcon size={17} weight="duotone" />
-                    )}
-                  </span>
+                  <UserAvatar
+                    url={activeConv.user.avatarUrl}
+                    userRole={activeConv.userRole}
+                    size={36}
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[14px] font-medium leading-tight text-star">
-                      {active.user.name}
-                      {active.user.shopName ? ` · ${active.user.shopName}` : ""}
+                      {activeConv.user.name}
+                      {activeConv.user.shopName ? ` · ${activeConv.user.shopName}` : ""}
                     </p>
                     <p className="truncate text-[12px] leading-tight text-star/40">
-                      {USER_ROLE_LABEL[active.userRole]} · {active.user.contact}
+                      {USER_ROLE_LABEL[activeConv.userRole]} · {activeConv.user.contact}
                     </p>
                   </div>
                   <GhostButton
                     className="h-9 text-[12.5px]"
-                    icon={active.status === "open" ? CheckCircle : undefined}
+                    icon={activeConv.status === "open" ? CheckCircle : undefined}
                     disabled={busy}
                     onClick={() => void toggleStatus()}
                   >
-                    {active.status === "open" ? "Đóng" : "Mở lại"}
+                    {activeConv.status === "open" ? "Đóng" : "Mở lại"}
                   </GhostButton>
                 </div>
 
